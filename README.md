@@ -29,6 +29,7 @@ pi install git:git@github.com:ravshansbox/pi-subagent.git
 ```
 
 This installs the package as a git-based pi package and lets pi discover its resources automatically.
+Bundled default agents are loaded directly from the package, so you do not need to symlink agent markdown files separately.
 
 You can also pin to a ref if needed:
 
@@ -60,7 +61,7 @@ ln -sf ~/Projects/pi-subagent/src/index.ts ~/.pi/agent/extensions/subagent/index
 ln -sf ~/Projects/pi-subagent/src/agents.ts ~/.pi/agent/extensions/subagent/agents.ts
 ```
 
-Symlink sample agents:
+Symlink sample agents only if you explicitly want them installed as user-level override files:
 
 ```bash
 mkdir -p ~/.pi/agent/agents
@@ -87,7 +88,7 @@ Restart pi so it reloads extensions, agents, and prompts.
 After restart, verify:
 
 - the `subagent` tool is available
-- sample agents like `scout`, `planner`, `worker`, and `reviewer` are discoverable
+- sample agents like `scout`, `planner`, `worker`, and `reviewer` are discoverable without separate agent symlinks
 - workflow prompts like `/implement` and `/scout-and-plan` are available
 
 A simple smoke test is to ask pi to use the `subagent` tool with the `scout` agent on any small codebase task.
@@ -104,6 +105,16 @@ git pull
 ## Optional cleanup
 
 If you previously had a standalone copy under `~/.pi/agent/extensions/subagent`, you can remove duplicate bundled files there after confirming the symlinks work.
+
+## Agent precedence
+
+Agents are resolved in this order:
+
+1. packaged default agents from this package
+2. user agents from `~/.pi/agent/agents`
+3. project agents from `.pi/agents`
+
+Later sources override earlier ones by name, so project agents override user and packaged defaults, and user agents override packaged defaults.
 
 ## Notes
 

@@ -141,7 +141,7 @@ interface UsageStats {
 
 interface SingleResult {
 	agent: string;
-	agentSource: "user" | "project" | "unknown";
+	agentSource: "packaged" | "user" | "project" | "unknown";
 	task: string;
 	exitCode: number;
 	messages: Message[];
@@ -157,6 +157,7 @@ interface SubagentDetails {
 	mode: "single" | "parallel" | "chain";
 	agentScope: AgentScope;
 	projectAgentsDir: string | null;
+	packagedAgentsDir: string | null;
 	results: SingleResult[];
 }
 
@@ -466,6 +467,7 @@ export default function (pi: ExtensionAPI) {
 					mode,
 					agentScope,
 					projectAgentsDir: discovery.projectAgentsDir,
+					packagedAgentsDir: discovery.packagedAgentsDir,
 					results,
 				});
 

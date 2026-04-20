@@ -4,6 +4,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAgentDir, parseFrontmatter } from "@mariozechner/pi-coding-agent";
 
 export type AgentScope = "user" | "project" | "both";
@@ -14,16 +15,17 @@ export interface AgentConfig {
 	tools?: string[];
 	model?: string;
 	systemPrompt: string;
-	source: "user" | "project";
+	source: "packaged" | "user" | "project";
 	filePath: string;
 }
 
 export interface AgentDiscoveryResult {
 	agents: AgentConfig[];
 	projectAgentsDir: string | null;
+	packagedAgentsDir: string | null;
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+function loadAgentsFromDir(dir: string, source: "packaged" | "user" | "project"): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
 	if (!fs.existsSync(dir)) {
@@ -94,15 +96,26 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 	}
 }
 
+function getPackagedAgentsDir(): string | null {
+	const currentFile = fileURLToPath(import.meta.url);
+	const srcDir = path.dirname(currentFile);
+	const packageRoot = path.resolve(srcDir, "..");
+	const packagedAgentsDir = path.join(packageRoot, "agents");
+	return isDirectory(packagedAgentsDir) ? packagedAgentsDir : null;
+}
+
 export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
 	const userDir = path.join(getAgentDir(), "agents");
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
+	const packagedAgentsDir = getPackagedAgentsDir();
 
+	const packagedAgents = packagedAgentsDir ? loadAgentsFromDir(packagedAgentsDir, "packaged") : [];
 	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
 	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
 
 	const agentMap = new Map<string, AgentConfig>();
 
+	for (const agent of packagedAgents) agentMap.set(agent.name, agent);
 	if (scope === "both") {
 		for (const agent of userAgents) agentMap.set(agent.name, agent);
 		for (const agent of projectAgents) agentMap.set(agent.name, agent);
@@ -112,7 +125,7 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 		for (const agent of projectAgents) agentMap.set(agent.name, agent);
 	}
 
-	return { agents: Array.from(agentMap.values()), projectAgentsDir };
+	return { agents: Array.from(agentMap.values()), projectAgentsDir, packagedAgentsDir };
 }
 
 export function formatAgentList(agents: AgentConfig[], maxItems: number): { text: string; remaining: number } {
