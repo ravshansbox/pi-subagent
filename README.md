@@ -9,6 +9,9 @@ Extracted `subagent` extension for pi, packaged with sample agents and workflow 
 - `agents/` - sample agent definitions
 - `prompts/` - sample workflow prompts
 
+Default general-purpose agent: `general`
+Backward-compatible alias: `worker`
+
 ## Requirements
 
 This package is meant to be used from an existing pi installation.
@@ -88,7 +91,7 @@ Restart pi so it reloads extensions, agents, and prompts.
 After restart, verify:
 
 - the `subagent` tool is available
-- sample agents like `scout`, `planner`, `worker`, and `reviewer` are discoverable without separate agent symlinks
+- sample agents like `scout`, `planner`, `general`, `worker`, and `reviewer` are discoverable without separate agent symlinks
 - workflow prompts like `/implement` and `/scout-and-plan` are available
 
 A simple smoke test is to ask pi to use the `subagent` tool with the `scout` agent on any small codebase task.
