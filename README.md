@@ -22,15 +22,37 @@ It relies on pi packages already available in the runtime environment:
 
 ## Installation
 
-Clone the repository somewhere on your machine, for example:
+Recommended install via pi package manager:
+
+```bash
+pi install git:git@github.com:ravshansbox/pi-subagent.git
+```
+
+This installs the package as a git-based pi package and lets pi discover its resources automatically.
+
+You can also pin to a ref if needed:
+
+```bash
+pi install git:git@github.com:ravshansbox/pi-subagent.git@main
+```
+
+### Project-local install
+
+To install only for the current project:
+
+```bash
+pi install -l git:git@github.com:ravshansbox/pi-subagent.git
+```
+
+### Manual install
+
+If you prefer local development with symlinks instead of `pi install`, clone the repository somewhere on your machine, for example:
 
 ```bash
 git clone git@github.com:ravshansbox/pi-subagent.git ~/Projects/pi-subagent
 ```
 
-Then install it into pi by symlinking the extension code.
-
-### 1. Symlink the extension
+Then symlink the extension code:
 
 ```bash
 mkdir -p ~/.pi/agent/extensions/subagent
@@ -38,7 +60,7 @@ ln -sf ~/Projects/pi-subagent/src/index.ts ~/.pi/agent/extensions/subagent/index
 ln -sf ~/Projects/pi-subagent/src/agents.ts ~/.pi/agent/extensions/subagent/agents.ts
 ```
 
-### 2. Symlink sample agents
+Symlink sample agents:
 
 ```bash
 mkdir -p ~/.pi/agent/agents
@@ -47,7 +69,7 @@ for f in ~/Projects/pi-subagent/agents/*.md; do
 done
 ```
 
-### 3. Symlink workflow prompts
+Symlink workflow prompts:
 
 ```bash
 mkdir -p ~/.pi/agent/prompts
@@ -56,7 +78,7 @@ for f in ~/Projects/pi-subagent/prompts/*.md; do
 done
 ```
 
-### 4. Restart pi
+### Restart pi
 
 Restart pi so it reloads extensions, agents, and prompts.
 
