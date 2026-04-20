@@ -234,6 +234,26 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 	return { command: "pi", args };
 }
 
+function levenshtein(a: string, b: string): number {
+	const matrix: number[][] = [];
+	for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+	for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+	for (let i = 1; i <= b.length; i++) {
+		for (let j = 1; j <= a.length; j++) {
+			if (b[i - 1] === a[j - 1]) {
+				matrix[i][j] = matrix[i - 1][j - 1];
+			} else {
+				matrix[i][j] = Math.min(
+					matrix[i - 1][j - 1] + 1,
+					matrix[i][j - 1] + 1,
+					matrix[i - 1][j] + 1,
+				);
+			}
+		}
+	}
+	return matrix[b.length][a.length];
+}
+
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
 async function runSingleAgent(
@@ -252,13 +272,24 @@ async function runSingleAgent(
 
 	if (!agent) {
 		const available = agents.map((a) => `"${a.name}"`).join(", ") || "none";
+		// Find closest match by Levenshtein-like distance
+		let closest = "";
+		let closestDist = Infinity;
+		for (const a of agents) {
+			const dist = levenshtein(agentName.toLowerCase(), a.name.toLowerCase());
+			if (dist < closestDist) {
+				closestDist = dist;
+				closest = a.name;
+			}
+		}
+		const suggestion = closestDist <= 3 && closest !== agentName ? ` Did you mean "${closest}"?` : "";
 		return {
 			agent: agentName,
 			agentSource: "unknown",
 			task,
 			exitCode: 1,
 			messages: [],
-			stderr: `Unknown agent: "${agentName}". Available agents: ${available}.`,
+			stderr: `Unknown agent: "${agentName}". Available agents: ${available}.${suggestion}`,
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 			step,
 		};
@@ -437,15 +468,26 @@ const SubagentParams = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
+	// Discover agents once at load time so we can describe them to the model
+	const loadTimeAgents = discoverAgents(process.cwd(), "user").agents;
+	const agentList = loadTimeAgents.map((a) => `"${a.name}" (${a.description})`).join(", ") || "none";
+
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
+			`Available agents: ${agentList}`,
 			'Default agent scope is "user" (from ~/.pi/agent/agents).',
 			'To enable project-local agents in .pi/agents, set agentScope: "both" (or "project").',
 		].join(" "),
+		promptSnippet: "Delegate tasks to specialized subagents (scout, planner, general, reviewer, code-reviewer)",
+		promptGuidelines: [
+			`Use the "agent" parameter with an exact agent name. Available agents: ${loadTimeAgents.map((a) => `"${a.name}"`).join(", ")}`,
+			"Do not invent agent names. Only use the exact names listed above.",
+			"Use \"general\" for general-purpose tasks. Use \"scout\" for codebase recon. Use \"planner\" for planning. Use \"reviewer\" or \"code-reviewer\" for code review.",
+		],
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
