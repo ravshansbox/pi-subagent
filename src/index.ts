@@ -482,7 +482,7 @@ export default function (pi: ExtensionAPI) {
 			'Default agent scope is "user" (from ~/.pi/agent/agents).',
 			'To enable project-local agents in .pi/agents, set agentScope: "both" (or "project").',
 		].join(" "),
-		promptSnippet: "Delegate tasks to specialized subagents (scout, planner, general, reviewer, code-reviewer)",
+		promptSnippet: `Delegate tasks to specialized subagents (${loadTimeAgents.map((a) => a.name).join(", ")})`,
 		promptGuidelines: [
 			`Use the "agent" parameter with an exact agent name. Available agents: ${loadTimeAgents.map((a) => `"${a.name}"`).join(", ")}`,
 			"Do not invent agent names. Only use the exact names listed above.",
