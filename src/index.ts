@@ -486,7 +486,6 @@ export default function (pi: ExtensionAPI) {
 		promptGuidelines: [
 			`Use the "agent" parameter with an exact agent name. Available agents: ${loadTimeAgents.map((a) => `"${a.name}"`).join(", ")}`,
 			"Do not invent agent names. Only use the exact names listed above.",
-			"Use \"general\" for general-purpose tasks. Use \"scout\" for codebase recon. Use \"planner\" for planning. Use \"reviewer\" or \"code-reviewer\" for code review.",
 		],
 		parameters: SubagentParams,
 
