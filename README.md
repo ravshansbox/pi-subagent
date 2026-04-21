@@ -7,7 +7,6 @@ Subagent extension for pi — delegate tasks to isolated subagent processes.
 - `src/index.ts` - subagent tool implementation
 - `src/agents.ts` - agent discovery logic
 - `agents/` - bundled agent definitions (ships with `general`)
-- `prompts/` - sample workflow prompts
 
 ## Bundled agent
 
@@ -99,13 +98,7 @@ Custom agents override bundled agents with the same name.
 
 Later sources override earlier ones by name.
 
-## Workflow prompts
 
-| Prompt | Flow |
-|--------|------|
-| `/implement <query>` | general → general → general (find, plan, implement) |
-| `/scout-and-plan <query>` | general → general (find, plan) |
-| `/implement-and-review <query>` | general → general → general (implement, review, fix) |
 
 ## Notes
 

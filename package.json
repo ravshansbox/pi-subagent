@@ -3,22 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Subagent extension for pi with sample agents and workflow prompts",
+  "description": "Subagent extension for pi — delegate tasks to isolated subagent processes",
   "keywords": [
     "pi-package"
   ],
   "files": [
     "src",
     "agents",
-    "prompts",
     "README.md"
   ],
   "pi": {
     "extensions": [
       "src/index.ts"
-    ],
-    "prompts": [
-      "prompts"
     ]
   },
   "peerDependencies": {
