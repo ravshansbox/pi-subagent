@@ -3,18 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Subagent extension for pi — delegate tasks to isolated subagent processes",
+  "description": "Subagent extension for pi \u2014 delegate tasks to isolated subagent processes",
   "keywords": [
     "pi-package"
   ],
   "files": [
-    "src",
+    "index.ts",
+    "agents.ts",
     "agents",
     "README.md"
   ],
   "pi": {
     "extensions": [
-      "src/index.ts"
+      "./index.ts"
     ]
   },
   "peerDependencies": {
