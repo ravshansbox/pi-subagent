@@ -1,12 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
     "strict": true,
-    "skipLibCheck": true,
-    "declaration": true,
-    "outDir": "dist"
-  },
-  "include": ["src/**/*.ts"]
+    "skipLibCheck": true
+  }
 }

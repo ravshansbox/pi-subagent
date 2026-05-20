@@ -21,10 +21,10 @@ Add your own agents to `~/.pi/agent/agents/` or `.pi/agents/`. See below.
 This package is meant to be used from an existing pi installation.
 It relies on pi packages already available in the runtime environment:
 
-- `@mariozechner/pi-agent-core`
-- `@mariozechner/pi-ai`
-- `@mariozechner/pi-coding-agent`
-- `@mariozechner/pi-tui`
+- `@earendil-works/pi-agent-core`
+- `@earendil-works/pi-ai`
+- `@earendil-works/pi-coding-agent`
+- `@earendil-works/pi-tui`
 - `@sinclair/typebox`
 
 ## Installation
