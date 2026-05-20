@@ -98,10 +98,21 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 
 function getPackagedAgentsDir(): string | null {
 	const currentFile = fileURLToPath(import.meta.url);
-	const srcDir = path.dirname(currentFile);
-	const packageRoot = path.resolve(srcDir, "..");
-	const packagedAgentsDir = path.join(packageRoot, "agents");
-	return isDirectory(packagedAgentsDir) ? packagedAgentsDir : null;
+	const currentDir = path.dirname(currentFile);
+
+	// Support both common package layouts:
+	// - source/manual install: <package>/index.ts, <package>/agents.ts, <package>/agents/
+	// - compiled layout:       <package>/dist/agents.js or <package>/src/agents.ts, <package>/agents/
+	const candidates = [
+		path.join(currentDir, "agents"),
+		path.join(currentDir, "..", "agents"),
+	];
+
+	for (const candidate of candidates) {
+		if (isDirectory(candidate)) return candidate;
+	}
+
+	return null;
 }
 
 export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
