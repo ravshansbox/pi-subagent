@@ -6,13 +6,13 @@ Subagent extension for pi — delegate tasks to isolated subagent processes.
 
 - `src/index.ts` - subagent tool implementation
 - `src/agents.ts` - agent discovery logic
-- `agents/` - bundled agent definitions (ships with `general`)
+- `agents/` - bundled agent definitions (ships with `delegate`)
 
 ## Bundled agent
 
 | Agent | Description |
 |-------|-------------|
-| `general` | Default general-purpose subagent with full capabilities |
+| `delegate` | Default general-purpose subagent for delegated tasks with full capabilities |
 
 Add your own agents to `~/.pi/agent/agents/` or `.pi/agents/`. See below.
 
@@ -63,9 +63,9 @@ ln -sf ~/Projects/pi-subagent/src/agents.ts ~/.pi/agent/extensions/subagent/agen
 After install and reload, verify:
 
 - the `subagent` tool is available
-- the `general` agent is discoverable
+- the `delegate` agent is discoverable
 
-Smoke test: ask pi to use the `subagent` tool with the `general` agent.
+Smoke test: ask pi to use the `subagent` tool with the `delegate` agent.
 
 ## Upgrade
 
