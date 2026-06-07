@@ -18,7 +18,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
-import { clampThinkingLevel, StringEnum } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getModel, StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -56,7 +56,18 @@ function formatUsageStats(
 	if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
 	if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
 	if (usage.contextTokens && usage.contextTokens > 0) {
-		parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
+		const modelParts = model?.split("/");
+		let contextDisplay = formatTokens(usage.contextTokens);
+		if (modelParts?.length === 2) {
+			try {
+				const modelInfo = getModel(modelParts[0] as any, modelParts[1] as any);
+				if (modelInfo?.contextWindow) {
+					const percent = ((usage.contextTokens / modelInfo.contextWindow) * 100).toFixed(1);
+					contextDisplay = `${percent}%/${formatTokens(modelInfo.contextWindow)}`;
+				}
+			} catch {}
+		}
+		parts.push(contextDisplay);
 	}
 	const modelParts = model?.split("/");
 	const modelDisplay = modelParts?.length === 2 ? `(${modelParts[0]}) ${modelParts[1]}` : model;
