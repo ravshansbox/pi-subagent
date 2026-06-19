@@ -25,16 +25,12 @@ export interface AgentDiscoveryResult {
 	packagedAgentsDir: string | null;
 }
 
-function loadAgentsFromDir(dir: string, source: "packaged" | "user" | "project"): AgentConfig[] {
+async function loadAgentsFromDir(dir: string, source: "packaged" | "user" | "project"): Promise<AgentConfig[]> {
 	const agents: AgentConfig[] = [];
-
-	if (!fs.existsSync(dir)) {
-		return agents;
-	}
 
 	let entries: fs.Dirent[];
 	try {
-		entries = fs.readdirSync(dir, { withFileTypes: true });
+		entries = await fs.promises.readdir(dir, { withFileTypes: true });
 	} catch {
 		return agents;
 	}
@@ -46,7 +42,7 @@ function loadAgentsFromDir(dir: string, source: "packaged" | "user" | "project")
 		const filePath = path.join(dir, entry.name);
 		let content: string;
 		try {
-			content = fs.readFileSync(filePath, "utf-8");
+			content = await fs.promises.readFile(filePath, "utf-8");
 		} catch {
 			continue;
 		}
@@ -76,19 +72,19 @@ function loadAgentsFromDir(dir: string, source: "packaged" | "user" | "project")
 	return agents;
 }
 
-function isDirectory(p: string): boolean {
+async function isDirectory(p: string): Promise<boolean> {
 	try {
-		return fs.statSync(p).isDirectory();
+		return (await fs.promises.stat(p)).isDirectory();
 	} catch {
 		return false;
 	}
 }
 
-function findNearestProjectAgentsDir(cwd: string): string | null {
+async function findNearestProjectAgentsDir(cwd: string): Promise<string | null> {
 	let currentDir = cwd;
 	while (true) {
 		const candidate = path.join(currentDir, ".pi", "agents");
-		if (isDirectory(candidate)) return candidate;
+		if (await isDirectory(candidate)) return candidate;
 
 		const parentDir = path.dirname(currentDir);
 		if (parentDir === currentDir) return null;
@@ -96,7 +92,7 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 	}
 }
 
-function getPackagedAgentsDir(): string | null {
+async function getPackagedAgentsDir(): Promise<string | null> {
 	const currentFile = fileURLToPath(import.meta.url);
 	const currentDir = path.dirname(currentFile);
 
@@ -109,20 +105,20 @@ function getPackagedAgentsDir(): string | null {
 	];
 
 	for (const candidate of candidates) {
-		if (isDirectory(candidate)) return candidate;
+		if (await isDirectory(candidate)) return candidate;
 	}
 
 	return null;
 }
 
-export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
+export async function discoverAgents(cwd: string, scope: AgentScope): Promise<AgentDiscoveryResult> {
 	const userDir = path.join(getAgentDir(), "agents");
-	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
-	const packagedAgentsDir = getPackagedAgentsDir();
+	const projectAgentsDir = await findNearestProjectAgentsDir(cwd);
+	const packagedAgentsDir = await getPackagedAgentsDir();
 
-	const packagedAgents = packagedAgentsDir ? loadAgentsFromDir(packagedAgentsDir, "packaged") : [];
-	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
-	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
+	const packagedAgents = packagedAgentsDir ? await loadAgentsFromDir(packagedAgentsDir, "packaged") : [];
+	const userAgents = scope === "project" ? [] : await loadAgentsFromDir(userDir, "user");
+	const projectAgents = scope === "user" || !projectAgentsDir ? [] : await loadAgentsFromDir(projectAgentsDir, "project");
 
 	const agentMap = new Map<string, AgentConfig>();
 

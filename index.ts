@@ -233,11 +233,14 @@ async function writePromptToTempFile(agentName: string, prompt: string): Promise
 	return { dir: tmpDir, filePath };
 }
 
-function getPiInvocation(args: string[]): { command: string; args: string[] } {
+async function getPiInvocation(args: string[]): Promise<{ command: string; args: string[] }> {
 	const currentScript = process.argv[1];
 	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
-	if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
-		return { command: process.execPath, args: [currentScript, ...args] };
+	if (currentScript && !isBunVirtualScript) {
+		try {
+			await fs.promises.access(currentScript);
+			return { command: process.execPath, args: [currentScript, ...args] };
+		} catch {}
 	}
 
 	const execName = path.basename(process.execPath).toLowerCase();
@@ -358,8 +361,8 @@ async function runSingleAgent(
 		args.push(`Task: ${task}`);
 		let wasAborted = false;
 
-		const exitCode = await new Promise<number>((resolve) => {
-			const invocation = getPiInvocation(args);
+		const exitCode = await new Promise<number>(async (resolve) => {
+			const invocation = await getPiInvocation(args);
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
 				shell: false,
@@ -443,16 +446,12 @@ async function runSingleAgent(
 	} finally {
 		if (tmpPromptPath)
 			try {
-				fs.unlinkSync(tmpPromptPath);
-			} catch {
-				/* ignore */
-			}
+				await fs.promises.unlink(tmpPromptPath);
+			} catch {}
 		if (tmpPromptDir)
 			try {
-				fs.rmdirSync(tmpPromptDir);
-			} catch {
-				/* ignore */
-			}
+				await fs.promises.rmdir(tmpPromptDir);
+			} catch {}
 	}
 }
 
@@ -487,9 +486,8 @@ const SubagentParams = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
 });
 
-export default function (pi: ExtensionAPI) {
-	// Discover agents once at load time so we can describe them to the model
-	const loadTimeAgents = discoverAgents(process.cwd(), "user").agents;
+export default async function (pi: ExtensionAPI) {
+	const loadTimeAgents = (await discoverAgents(process.cwd(), "user")).agents;
 	const agentList = loadTimeAgents.map((a) => `"${a.name}" (${a.description})`).join(", ") || "none";
 
 	pi.registerTool({
@@ -511,7 +509,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const agentScope = (params.agentScope ?? "user") as AgentScope;
-			const discovery = discoverAgents(ctx.cwd, agentScope);
+			const discovery = await discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
