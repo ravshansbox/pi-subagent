@@ -31,8 +31,8 @@ jobs:
       - name: Verify release tag
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
 
-      - name: Type-check
-        run: npm run typecheck
+      - name: Check package
+        run: npm run check
 
       - name: Publish
         run: npm publish

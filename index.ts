@@ -90,18 +90,18 @@ function formatToolCall(
 
   switch (toolName) {
     case 'bash': {
-      const command = (args.command as string) || '...';
+      const command = (args['command'] as string) || '...';
       return themeFg('muted', '$ ') + themeFg('toolOutput', command);
     }
     case 'read': {
-      const rawPath = (args.file_path || args.path || '...') as string;
+      const rawPath = (args['file_path'] || args['path'] || '...') as string;
       const filePath = shortenPath(rawPath);
-      const offset = args.offset as number | undefined;
-      const limit = args.limit as number | undefined;
+      const offset = args['offset'] as number | undefined;
+      const limit = args['limit'] as number | undefined;
+      const startLine = offset ?? 1;
+      const endLine = limit !== undefined ? startLine + limit - 1 : '';
       let text = themeFg('accent', filePath);
       if (offset !== undefined || limit !== undefined) {
-        const startLine = offset ?? 1;
-        const endLine = limit !== undefined ? startLine + limit - 1 : '';
         text += themeFg(
           'warning',
           `:${startLine}${endLine ? `-${endLine}` : ''}`,
@@ -110,27 +110,27 @@ function formatToolCall(
       return themeFg('muted', 'read ') + text;
     }
     case 'write': {
-      const rawPath = (args.file_path || args.path || '...') as string;
+      const rawPath = (args['file_path'] || args['path'] || '...') as string;
       const filePath = shortenPath(rawPath);
-      const content = (args.content || '') as string;
+      const content = (args['content'] || '') as string;
       const lines = content.split('\n').length;
       let text = themeFg('muted', 'write ') + themeFg('accent', filePath);
       if (lines > 1) text += themeFg('dim', ` (${lines} lines)`);
       return text;
     }
     case 'edit': {
-      const rawPath = (args.file_path || args.path || '...') as string;
+      const rawPath = (args['file_path'] || args['path'] || '...') as string;
       return (
         themeFg('muted', 'edit ') + themeFg('accent', shortenPath(rawPath))
       );
     }
     case 'ls': {
-      const rawPath = (args.path || '.') as string;
+      const rawPath = (args['path'] || '.') as string;
       return themeFg('muted', 'ls ') + themeFg('accent', shortenPath(rawPath));
     }
     case 'find': {
-      const pattern = (args.pattern || '*') as string;
-      const rawPath = (args.path || '.') as string;
+      const pattern = (args['pattern'] || '*') as string;
+      const rawPath = (args['path'] || '.') as string;
       return (
         themeFg('muted', 'find ') +
         themeFg('accent', pattern) +
@@ -138,8 +138,8 @@ function formatToolCall(
       );
     }
     case 'grep': {
-      const pattern = (args.pattern || '') as string;
-      const rawPath = (args.path || '.') as string;
+      const pattern = (args['pattern'] || '') as string;
+      const rawPath = (args['path'] || '.') as string;
       return (
         themeFg('muted', 'grep ') +
         themeFg('accent', `/${pattern}/`) +
@@ -171,12 +171,12 @@ interface SingleResult {
   messages: Message[];
   stderr: string;
   usage: UsageStats;
-  model?: string;
-  contextWindow?: number;
-  thinkingLevel?: string;
-  stopReason?: string;
-  errorMessage?: string;
-  step?: number;
+  model?: string | undefined;
+  contextWindow?: number | undefined;
+  thinkingLevel?: string | undefined;
+  stopReason?: string | undefined;
+  errorMessage?: string | undefined;
+  step?: number | undefined;
 }
 
 interface SubagentDetails {
@@ -188,8 +188,7 @@ interface SubagentDetails {
 }
 
 function getFinalOutput(messages: Message[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
+  for (const msg of [...messages].reverse()) {
     if (msg.role === 'assistant') {
       for (const part of msg.content) {
         if (part.type === 'text') return part.text;
@@ -230,13 +229,15 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
   const limit = Math.max(1, Math.min(concurrency, items.length));
   const results: TOut[] = new Array(items.length);
   let nextIndex = 0;
-  const workers = new Array(limit).fill(null).map(async () => {
+  const runWorker = async (): Promise<void> => {
     while (true) {
       const current = nextIndex++;
       if (current >= items.length) return;
-      results[current] = await fn(items[current], current);
+      results[current] = await fn(items[current] as TIn, current);
     }
-  });
+  };
+  const workers: Promise<void>[] = [];
+  for (let worker = 0; worker < limit; worker++) workers.push(runWorker());
   await Promise.all(workers);
   return results;
 }
@@ -268,7 +269,9 @@ async function getPiInvocation(
     try {
       await fs.promises.access(currentScript);
       return { command: process.execPath, args: [currentScript, ...args] };
-    } catch {}
+    } catch {
+      // Script path is not accessible; fall through to runtime detection.
+    }
   }
 
   const execName = path.basename(process.execPath).toLowerCase();
@@ -281,23 +284,25 @@ async function getPiInvocation(
 }
 
 function levenshtein(a: string, b: string): number {
-  const matrix: number[][] = [];
-  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  // Rolling single-row implementation: only the previous row is needed.
+  let previous = Array.from({ length: a.length + 1 }, (_, i) => i);
+
   for (let i = 1; i <= b.length; i++) {
+    const current: number[] = [i];
     for (let j = 1; j <= a.length; j++) {
-      if (b[i - 1] === a[j - 1]) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1,
-        );
-      }
+      const substitution =
+        (previous[j - 1] ?? 0) + (b[i - 1] === a[j - 1] ? 0 : 1);
+      const insertion = (current[j - 1] ?? 0) + 1;
+      const deletion = (previous[j] ?? 0) + 1;
+      current.push(Math.min(substitution, insertion, deletion));
     }
+    previous = current;
   }
-  return matrix[b.length][a.length];
+
+  return previous[a.length] ?? 0;
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
@@ -363,7 +368,6 @@ async function runSingleAgent(
     };
   }
 
-  const modelToUse = agent.model || parentModel?.id;
   const args: string[] = ['--mode', 'json', '-p', '--no-session'];
   if (agent.model) {
     args.push('--model', agent.model);
@@ -526,11 +530,15 @@ async function runSingleAgent(
     if (tmpPromptPath)
       try {
         await fs.promises.unlink(tmpPromptPath);
-      } catch {}
+      } catch {
+        // Best-effort cleanup of the temp prompt file.
+      }
     if (tmpPromptDir)
       try {
         await fs.promises.rmdir(tmpPromptDir);
-      } catch {}
+      } catch {
+        // Best-effort cleanup of the temp prompt directory.
+      }
   }
 }
 
@@ -714,8 +722,7 @@ export default async function (pi: ExtensionAPI) {
         const results: SingleResult[] = [];
         let previousOutput = '';
 
-        for (let i = 0; i < params.chain.length; i++) {
-          const step = params.chain[i];
+        for (const [i, step] of params.chain.entries()) {
           const taskWithContext = step.task.replace(
             /\{previous\}/g,
             previousOutput,
@@ -778,8 +785,7 @@ export default async function (pi: ExtensionAPI) {
             {
               type: 'text',
               text:
-                getFinalOutput(results[results.length - 1].messages) ||
-                '(no output)',
+                getFinalOutput(results.at(-1)?.messages ?? []) || '(no output)',
             },
           ],
           details: makeDetails('chain')(results),
@@ -800,11 +806,11 @@ export default async function (pi: ExtensionAPI) {
 
         const allResults: SingleResult[] = new Array(params.tasks.length);
 
-        for (let i = 0; i < params.tasks.length; i++) {
+        for (const [i, task] of params.tasks.entries()) {
           allResults[i] = {
-            agent: params.tasks[i].agent,
+            agent: task.agent,
             agentSource: 'unknown',
-            task: params.tasks[i].task,
+            task: task.task,
             exitCode: -1,
             messages: [],
             stderr: '',
@@ -948,8 +954,7 @@ export default async function (pi: ExtensionAPI) {
           theme.fg('toolTitle', theme.bold('subagent ')) +
           theme.fg('accent', `chain (${args.chain.length} steps)`) +
           theme.fg('muted', ` [${scope}]`);
-        for (let i = 0; i < args.chain.length; i++) {
-          const step = args.chain[i];
+        for (const [i, step] of args.chain.entries()) {
           const cleanTask = step.task.replace(/\{previous\}/g, '').trim();
           text +=
             '\n  ' +
@@ -1014,7 +1019,7 @@ export default async function (pi: ExtensionAPI) {
       };
 
       if (details.mode === 'single' && details.results.length === 1) {
-        const r = details.results[0];
+        const r = details.results[0]!;
         const isError =
           r.exitCode !== 0 ||
           r.stopReason === 'error' ||

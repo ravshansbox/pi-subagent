@@ -15,14 +15,12 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": [
-    "pi-package"
-  ],
   "files": [
     "index.ts",
     "agents.ts",
     "agents",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [
@@ -37,9 +35,16 @@
     "typebox": "*"
   },
   "devDependencies": {
+    "@types/node": "^26.1.2",
     "typescript": "^6.0.3"
   },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "subagent"
+  ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck"
   }
 }
