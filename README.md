@@ -1,4 +1,4 @@
-# pi-subagent
+# @ravshansbox/pi-subagent
 
 Subagent extension for pi — delegate tasks to isolated subagent processes.
 
@@ -10,8 +10,8 @@ Subagent extension for pi — delegate tasks to isolated subagent processes.
 
 ## Bundled agent
 
-| Agent | Description |
-|-------|-------------|
+| Agent      | Description                                                                 |
+| ---------- | --------------------------------------------------------------------------- |
 | `delegate` | Default general-purpose subagent for delegated tasks with full capabilities |
 
 Add your own agents to `~/.pi/agent/agents/` or `.pi/agents/`. See below.
@@ -25,26 +25,32 @@ It relies on pi packages already available in the runtime environment:
 - `@earendil-works/pi-ai`
 - `@earendil-works/pi-coding-agent`
 - `@earendil-works/pi-tui`
-- `@sinclair/typebox`
+- `typebox`
 
 ## Installation
+
+```bash
+pi install npm:@ravshansbox/pi-subagent
+```
+
+Bundled agents are loaded directly from the package — no extra setup needed.
+
+### Project-local install
+
+```bash
+pi install -l npm:@ravshansbox/pi-subagent
+```
+
+### Install from Git
 
 ```bash
 pi install git:git@github.com:ravshansbox/pi-subagent.git
 ```
 
-Bundled agents are loaded directly from the package — no extra setup needed.
-
 You can also pin to a ref:
 
 ```bash
 pi install git:git@github.com:ravshansbox/pi-subagent.git@main
-```
-
-### Project-local install
-
-```bash
-pi install -l git:git@github.com:ravshansbox/pi-subagent.git
 ```
 
 ### Manual install
@@ -71,7 +77,7 @@ Smoke test: ask pi to use the `subagent` tool with the `delegate` agent.
 ## Upgrade
 
 ```bash
-pi update git:git@github.com:ravshansbox/pi-subagent.git
+pi update npm:@ravshansbox/pi-subagent
 ```
 
 ## Adding custom agents
@@ -99,8 +105,23 @@ Custom agents override bundled agents with the same name.
 
 Later sources override earlier ones by name.
 
+## Publishing
 
+Releases after `0.1.0` are published by `.github/workflows/publish.yml` using npm Trusted Publishing and the `npm-publish` GitHub environment. Protect this environment with required reviewers in the repository settings. The workflow requires a GitHub Release tag matching `v<package version>` and publishes with automatic provenance.
 
-## Notes
+Because npm requires a package to exist before assigning a trusted publisher, bootstrap `0.1.0` once from an authenticated local npm CLI:
 
-This package currently keeps pi dependencies as peer dependencies and is intended as a local reusable package.
+```bash
+npm login
+npm publish
+```
+
+Then configure the `@ravshansbox/pi-subagent` trusted publisher on npmjs.com:
+
+- provider: GitHub Actions
+- organisation or user: `ravshansbox`
+- repository: `pi-subagent`
+- workflow: `publish.yml`
+- environment: `npm-publish`
+
+No `NPM_TOKEN` is required after the trusted publisher is configured.

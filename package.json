@@ -1,9 +1,20 @@
 {
-  "name": "pi-subagent",
+  "name": "@ravshansbox/pi-subagent",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "description": "Subagent extension for pi — delegate tasks to isolated subagent processes",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ravshansbox/pi-subagent.git"
+  },
+  "homepage": "https://github.com/ravshansbox/pi-subagent#readme",
+  "bugs": {
+    "url": "https://github.com/ravshansbox/pi-subagent/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "pi-package"
   ],
@@ -23,13 +34,12 @@
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
-    "@sinclair/typebox": "*"
+    "typebox": "*"
   },
   "devDependencies": {
     "typescript": "^6.0.3"
   },
   "scripts": {
-    "test": "node --test",
     "typecheck": "tsc --noEmit"
   }
 }

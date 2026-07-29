@@ -18,10 +18,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
-import { clampThinkingLevel, getModel, StringEnum } from "@earendil-works/pi-ai";
+import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 
 const MAX_PARALLEL_TASKS = 8;
@@ -47,6 +47,7 @@ function formatUsageStats(
 	},
 	model?: string,
 	thinkingLevel?: string,
+	contextWindow?: number,
 ): string {
 	const parts: string[] = [];
 	if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
@@ -56,16 +57,10 @@ function formatUsageStats(
 	if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
 	if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
 	if (usage.contextTokens && usage.contextTokens > 0) {
-		const modelParts = model?.split("/");
 		let contextDisplay = formatTokens(usage.contextTokens);
-		if (modelParts?.length === 2) {
-			try {
-				const modelInfo = getModel(modelParts[0] as any, modelParts[1] as any);
-				if (modelInfo?.contextWindow) {
-					const percent = ((usage.contextTokens / modelInfo.contextWindow) * 100).toFixed(1);
-					contextDisplay = `${percent}%/${formatTokens(modelInfo.contextWindow)}`;
-				}
-			} catch {}
+		if (contextWindow) {
+			const percent = ((usage.contextTokens / contextWindow) * 100).toFixed(1);
+			contextDisplay = `${percent}%/${formatTokens(contextWindow)}`;
 		}
 		parts.push(contextDisplay);
 	}
@@ -162,6 +157,7 @@ interface SingleResult {
 	stderr: string;
 	usage: UsageStats;
 	model?: string;
+	contextWindow?: number;
 	thinkingLevel?: string;
 	stopReason?: string;
 	errorMessage?: string;
@@ -285,7 +281,8 @@ async function runSingleAgent(
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
 	parentModel: { provider?: string; id?: string } | undefined,
-	parentThinkingLevel?: string,
+	parentThinkingLevel: string | undefined,
+	resolveContextWindow: (model: string | undefined) => number | undefined,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -328,6 +325,8 @@ async function runSingleAgent(
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
 
+	const initialModel =
+		agent.model || (parentModel?.provider && parentModel?.id ? `${parentModel.provider}/${parentModel.id}` : parentModel?.id);
 	const currentResult: SingleResult = {
 		agent: agentName,
 		agentSource: agent.source,
@@ -336,7 +335,8 @@ async function runSingleAgent(
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model: agent.model || (parentModel?.provider && parentModel?.id ? `${parentModel.provider}/${parentModel.id}` : parentModel?.id),
+		model: initialModel,
+		contextWindow: resolveContextWindow(initialModel),
 		thinkingLevel: parentThinkingLevel,
 		step,
 	};
@@ -394,7 +394,10 @@ async function runSingleAgent(
 							currentResult.usage.cost += usage.cost?.total || 0;
 							currentResult.usage.contextTokens = usage.totalTokens || 0;
 						}
-						if (!currentResult.model && msg.model) currentResult.model = msg.provider ? `${msg.provider}/${msg.model}` : msg.model;
+						if (msg.model) {
+							currentResult.model = msg.provider ? `${msg.provider}/${msg.model}` : msg.model;
+							currentResult.contextWindow = resolveContextWindow(currentResult.model);
+						}
 						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
 						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
 					}
@@ -515,6 +518,15 @@ export default async function (pi: ExtensionAPI) {
 
 			const parentModel = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
 			const parentThinkingLevel = ctx.model ? clampThinkingLevel(ctx.model, pi.getThinkingLevel()) : pi.getThinkingLevel();
+			const resolveContextWindow = (model: string | undefined): number | undefined => {
+				if (!model) return undefined;
+				const separator = model.indexOf("/");
+				if (separator > 0) {
+					return ctx.modelRegistry.find(model.slice(0, separator), model.slice(separator + 1))?.contextWindow;
+				}
+				const matches = ctx.modelRegistry.getAll().filter((candidate) => candidate.id === model);
+				return matches.length === 1 ? matches[0].contextWindow : undefined;
+			};
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
@@ -602,6 +614,7 @@ export default async function (pi: ExtensionAPI) {
 						makeDetails("chain"),
 						parentModel,
 						parentThinkingLevel,
+						resolveContextWindow,
 					);
 					results.push(result);
 
@@ -681,6 +694,7 @@ export default async function (pi: ExtensionAPI) {
 						makeDetails("parallel"),
 						parentModel,
 						parentThinkingLevel,
+						resolveContextWindow,
 					);
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -716,6 +730,7 @@ export default async function (pi: ExtensionAPI) {
 					makeDetails("single"),
 					parentModel,
 					parentThinkingLevel,
+					resolveContextWindow,
 				);
 				const isError = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
 				if (isError) {
@@ -841,7 +856,7 @@ export default async function (pi: ExtensionAPI) {
 							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
 						}
 					}
-					const usageStr = formatUsageStats(r.usage, r.model, r.thinkingLevel);
+					const usageStr = formatUsageStats(r.usage, r.model, r.thinkingLevel, r.contextWindow);
 					if (usageStr) {
 						container.addChild(new Spacer(1));
 						container.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
@@ -861,7 +876,7 @@ export default async function (pi: ExtensionAPI) {
 					if (displayItems.length > COLLAPSED_ITEM_COUNT || hasClampedText)
 						text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 				}
-				const usageStr = formatUsageStats(r.usage, r.model, r.thinkingLevel);
+				const usageStr = formatUsageStats(r.usage, r.model, r.thinkingLevel, r.contextWindow);
 				if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
 				return new Text(text, 0, 0);
 			}
@@ -928,7 +943,7 @@ export default async function (pi: ExtensionAPI) {
 							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
 						}
 
-						const stepUsage = formatUsageStats(r.usage, r.model, r.thinkingLevel);
+						const stepUsage = formatUsageStats(r.usage, r.model, r.thinkingLevel, r.contextWindow);
 						if (stepUsage) container.addChild(new Text(theme.fg("dim", stepUsage), 0, 0));
 					}
 
@@ -1010,7 +1025,7 @@ export default async function (pi: ExtensionAPI) {
 							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
 						}
 
-						const taskUsage = formatUsageStats(r.usage, r.model, r.thinkingLevel);
+						const taskUsage = formatUsageStats(r.usage, r.model, r.thinkingLevel, r.contextWindow);
 						if (taskUsage) container.addChild(new Text(theme.fg("dim", taskUsage), 0, 0));
 					}
 
