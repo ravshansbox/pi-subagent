@@ -322,7 +322,7 @@ async function runSingleAgent(
 		if (parentModel.provider) args.push("--provider", parentModel.provider);
 		args.push("--model", parentModel.id);
 	}
-	if (parentThinkingLevel && parentThinkingLevel !== "off") args.push("--thinking", parentThinkingLevel);
+	if (parentThinkingLevel) args.push("--thinking", parentThinkingLevel);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	let tmpPromptDir: string | null = null;
