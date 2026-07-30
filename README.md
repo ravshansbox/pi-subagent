@@ -5,7 +5,7 @@ Subagent extension for pi — delegate tasks to isolated subagent processes.
 ## Contents
 
 - `index.ts` - subagent tool implementation
-- `agents.ts` - agent discovery logic
+- `src/agents.ts` - agent discovery logic
 - `agents/` - bundled agent definitions (ships with `delegate`)
 
 ## Bundled agent
@@ -61,7 +61,7 @@ Clone and symlink if you prefer local development:
 git clone git@github.com:ravshansbox/pi-subagent.git ~/Projects/pi-subagent
 mkdir -p ~/.pi/agent/extensions/subagent ~/.pi/agent/extensions/subagent/agents
 ln -sf ~/Projects/pi-subagent/index.ts ~/.pi/agent/extensions/subagent/index.ts
-ln -sf ~/Projects/pi-subagent/agents.ts ~/.pi/agent/extensions/subagent/agents.ts
+ln -sf ~/Projects/pi-subagent/src/agents.ts ~/.pi/agent/extensions/subagent/agents.ts
 ln -sf ~/Projects/pi-subagent/agents/delegate.md ~/.pi/agent/extensions/subagent/agents/delegate.md
 ```
 

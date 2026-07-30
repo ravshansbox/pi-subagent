@@ -103,8 +103,8 @@ async function getPackagedAgentsDir(): Promise<string | null> {
   const currentDir = path.dirname(currentFile);
 
   // Support both common package layouts:
-  // - source/manual install: <package>/index.ts, <package>/agents.ts, <package>/agents/
-  // - compiled layout:       <package>/dist/agents.js or <package>/src/agents.ts, <package>/agents/
+  // - this package:     <package>/src/agents.ts, <package>/agents/
+  // - flat/compiled:    <package>/agents.ts or <package>/dist/agents.js, <package>/agents/
   const candidates = [
     path.join(currentDir, 'agents'),
     path.join(currentDir, '..', 'agents'),
