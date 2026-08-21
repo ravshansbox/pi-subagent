@@ -21,36 +21,16 @@ import type { Message } from '@earendil-works/pi-ai';
 import { clampThinkingLevel } from '@earendil-works/pi-ai';
 import {
   type ExtensionAPI,
-  type ExtensionContext,
-  type ExtensionUIContext,
   getMarkdownTheme,
-  type Theme,
   withFileMutationQueue,
 } from '@earendil-works/pi-coding-agent';
-import {
-  type Component,
-  Container,
-  type Focusable,
-  Markdown,
-  matchesKey,
-  Spacer,
-  Text,
-  truncateToWidth,
-  type TUI,
-  visibleWidth,
-} from '@earendil-works/pi-tui';
+import { Container, Markdown, Spacer, Text } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import { type AgentConfig, type AgentScope, discoverAgents } from './src/agents.ts';
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
-const MAX_FINISHED_RUNS = 20;
-const ROSTER_WIDGET_KEY = 'subagent-roster';
-const ROSTER_REFRESH_MS = 100;
-const ROSTER_TOOL_WIDTH = 60;
-const PICKER_MIN_HEIGHT = 6;
-const PICKER_STDERR_LINES = 10;
 
 function formatTokens(count: number): string {
   if (count < 1000) return count.toString();
@@ -238,367 +218,6 @@ function getDisplayItems(messages: Message[]): DisplayItem[] {
     }
   }
   return items;
-}
-
-type RunStatus = 'running' | 'done' | 'failed';
-
-interface RunEntry {
-  id: string;
-  status: RunStatus;
-  startedAt: number;
-  endedAt?: number;
-  result: SingleResult;
-}
-
-let nextRunId = 1;
-const runs: RunEntry[] = [];
-const runListeners = new Set<() => void>();
-
-function notifyRunListeners(): void {
-  for (const listener of runListeners) listener();
-}
-
-function subscribeRuns(listener: () => void): () => void {
-  runListeners.add(listener);
-  return () => {
-    runListeners.delete(listener);
-  };
-}
-
-function listRuns(): readonly RunEntry[] {
-  return runs;
-}
-
-function startRun(result: SingleResult): RunEntry {
-  const entry: RunEntry = {
-    id: String(nextRunId++),
-    status: 'running',
-    startedAt: Date.now(),
-    result,
-  };
-  runs.push(entry);
-  let finished = runs.filter((run) => run.status !== 'running').length;
-  while (finished > MAX_FINISHED_RUNS) {
-    const oldest = runs.findIndex((run) => run.status !== 'running');
-    if (oldest === -1) break;
-    runs.splice(oldest, 1);
-    finished--;
-  }
-  notifyRunListeners();
-  return entry;
-}
-
-function endRun(entry: RunEntry, failed: boolean): void {
-  entry.status = failed ? 'failed' : 'done';
-  entry.endedAt = Date.now();
-  notifyRunListeners();
-}
-
-function getLastToolCall(
-  messages: Message[],
-): { name: string; args: Record<string, unknown> } | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg?.role !== 'assistant') continue;
-    for (let j = msg.content.length - 1; j >= 0; j--) {
-      const part = msg.content[j];
-      if (part?.type === 'toolCall')
-        return { name: part.name, args: part.arguments };
-    }
-  }
-  return undefined;
-}
-
-function formatRunStats(result: SingleResult): string {
-  const parts: string[] = [
-    result.usage.turns
-      ? `${result.usage.turns} turn${result.usage.turns > 1 ? 's' : ''}`
-      : 'starting',
-  ];
-  if (result.usage.input) parts.push(`↑${formatTokens(result.usage.input)}`);
-  if (result.usage.output) parts.push(`↓${formatTokens(result.usage.output)}`);
-  if (result.usage.cost) parts.push(`$${result.usage.cost.toFixed(4)}`);
-  return parts.join(' ');
-}
-
-function formatLastToolCall(result: SingleResult): string | undefined {
-  const tool = getLastToolCall(result.messages);
-  if (!tool) return undefined;
-  const plain = formatToolCall(tool.name, tool.args, (_color, text) => text);
-  return truncateToWidth(plain.replace(/\s+/g, ' '), ROSTER_TOOL_WIDTH);
-}
-
-function renderRosterLines(theme: Theme): string[] {
-  const active = listRuns().filter((run) => run.status === 'running');
-  if (active.length === 0) return [];
-  const lines = [
-    theme.fg('toolTitle', theme.bold('subagent ')) +
-      theme.fg('muted', `${active.length} running`),
-  ];
-  for (const run of active) {
-    let line =
-      `${theme.fg('warning', '▸')} ` +
-      theme.fg('accent', run.result.agent) +
-      ` ${theme.fg('dim', formatRunStats(run.result))}`;
-    const tool = formatLastToolCall(run.result);
-    if (tool) line += `  ${theme.fg('muted', tool)}`;
-    lines.push(line);
-  }
-  return lines;
-}
-
-function bindRosterWidget(ui: ExtensionUIContext): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let shown = false;
-
-  const clear = () => {
-    if (!shown) return;
-    ui.setWidget(ROSTER_WIDGET_KEY, undefined);
-    shown = false;
-  };
-
-  const render = () => {
-    timer = null;
-    if (listRuns().every((run) => run.status !== 'running')) {
-      clear();
-      return;
-    }
-    ui.setWidget(
-      ROSTER_WIDGET_KEY,
-      (_tui, theme) => new Text(renderRosterLines(theme).join('\n'), 0, 0),
-      { placement: 'belowEditor' },
-    );
-    shown = true;
-  };
-
-  const unsubscribe = subscribeRuns(() => {
-    if (timer) return;
-    timer = setTimeout(render, ROSTER_REFRESH_MS);
-  });
-
-  return () => {
-    unsubscribe();
-    if (timer) clearTimeout(timer);
-    clear();
-  };
-}
-
-function formatRunIcon(entry: RunEntry, theme: Theme): string {
-  if (entry.status === 'running') return theme.fg('warning', '▸');
-  return entry.status === 'failed'
-    ? theme.fg('error', '✗')
-    : theme.fg('success', '✓');
-}
-
-function formatRunElapsed(entry: RunEntry): string {
-  const end = entry.endedAt ?? Date.now();
-  return `${Math.round((end - entry.startedAt) / 1000)}s`;
-}
-
-class RunPickerOverlay implements Component, Focusable {
-  focused = false;
-  private view: 'list' | 'log' = 'list';
-  private selectedId: string | null = null;
-  private scroll = 0;
-  private follow = true;
-  private readonly unsubscribe: () => void;
-
-  constructor(
-    private readonly tui: TUI,
-    private readonly theme: Theme,
-    private readonly done: (result: undefined) => void,
-  ) {
-    this.selectedId = listRuns().at(-1)?.id ?? null;
-    this.unsubscribe = subscribeRuns(() => tui.requestRender());
-  }
-
-  private selectedIndex(): number {
-    const index = listRuns().findIndex((run) => run.id === this.selectedId);
-    return index === -1 ? 0 : index;
-  }
-
-  private selectedRun(): RunEntry | undefined {
-    return listRuns().find((run) => run.id === this.selectedId);
-  }
-
-  dispose(): void {
-    this.unsubscribe();
-  }
-
-  invalidate(): void {}
-
-  private viewportHeight(): number {
-    return Math.max(
-      PICKER_MIN_HEIGHT,
-      Math.floor(this.tui.terminal.rows * 0.7) - 4,
-    );
-  }
-
-  handleInput(data: string): void {
-    const entries = listRuns();
-    if (!this.selectedRun()) this.selectedId = entries.at(-1)?.id ?? null;
-
-    if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
-      if (this.view === 'log') {
-        this.view = 'list';
-        this.scroll = 0;
-        this.follow = true;
-      } else this.done(undefined);
-      this.tui.requestRender();
-      return;
-    }
-
-    if (this.view === 'list') {
-      const index = this.selectedIndex();
-      if (matchesKey(data, 'up'))
-        this.selectedId = entries[Math.max(0, index - 1)]?.id ?? null;
-      else if (matchesKey(data, 'down'))
-        this.selectedId =
-          entries[Math.min(entries.length - 1, index + 1)]?.id ?? null;
-      else if (matchesKey(data, 'return') && entries.length > 0) {
-        this.view = 'log';
-        this.scroll = 0;
-        this.follow = true;
-      }
-      this.tui.requestRender();
-      return;
-    }
-
-    const height = this.viewportHeight();
-    const max = Math.max(0, this.logLines().length - height);
-    if (matchesKey(data, 'up')) this.scroll = Math.max(0, this.scroll - 1);
-    else if (matchesKey(data, 'down'))
-      this.scroll = Math.min(max, this.scroll + 1);
-    else if (matchesKey(data, 'pageUp'))
-      this.scroll = Math.max(0, this.scroll - height);
-    else if (matchesKey(data, 'pageDown'))
-      this.scroll = Math.min(max, this.scroll + height);
-    else if (matchesKey(data, 'home')) this.scroll = 0;
-    else if (matchesKey(data, 'end')) this.scroll = max;
-    this.follow = this.scroll >= max;
-    this.tui.requestRender();
-  }
-
-  private listLines(): string[] {
-    const entries = listRuns();
-    if (entries.length === 0)
-      return [this.theme.fg('muted', '(no subagent runs yet)')];
-    return entries.map((entry) => {
-      const marker =
-        entry.id === this.selectedId ? this.theme.fg('accent', '›') : ' ';
-      const tool = formatLastToolCall(entry.result);
-      const stats = `${formatRunStats(entry.result)} ${formatRunElapsed(entry)}`;
-      let line =
-        `${marker} ${formatRunIcon(entry, this.theme)} ` +
-        this.theme.fg('accent', entry.result.agent) +
-        ` ${this.theme.fg('dim', stats)}`;
-      if (tool) line += `  ${this.theme.fg('muted', tool)}`;
-      return line;
-    });
-  }
-
-  private logLines(): string[] {
-    const entry = this.selectedRun();
-    if (!entry) return [this.theme.fg('muted', '(no subagent runs yet)')];
-    const theme = this.theme;
-    const result = entry.result;
-    const lines: string[] = [
-      theme.fg('muted', 'Task: ') + theme.fg('dim', result.task),
-      '',
-    ];
-    for (const item of getDisplayItems(result.messages)) {
-      if (item.type === 'toolCall')
-        lines.push(
-          theme.fg('muted', '→ ') +
-            formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-        );
-      else
-        for (const line of item.text.split('\n'))
-          lines.push(theme.fg('toolOutput', line));
-    }
-    if (result.errorMessage)
-      lines.push('', theme.fg('error', `Error: ${result.errorMessage}`));
-    if (result.stderr.trim()) {
-      lines.push('', theme.fg('error', 'stderr:'));
-      for (const line of result.stderr
-        .trim()
-        .split('\n')
-        .slice(-PICKER_STDERR_LINES))
-        lines.push(theme.fg('error', line));
-    }
-    const usage = formatUsageStats(
-      result.usage,
-      result.model,
-      result.thinkingLevel,
-      result.contextWindow,
-    );
-    if (usage) lines.push('', theme.fg('dim', usage));
-    return lines;
-  }
-
-  render(width: number): string[] {
-    const theme = this.theme;
-    const inner = Math.max(1, width - 4);
-    const height = this.viewportHeight();
-    const isLog = this.view === 'log';
-    const entries = listRuns();
-    const selectedEntry = this.selectedRun();
-
-    const title = isLog
-      ? `subagent log · ${selectedEntry?.result.agent ?? '(none)'}`
-      : `subagent runs · ${entries.length}`;
-    const hint = isLog
-      ? '↑↓ scroll · esc back'
-      : '↑↓ select · enter open · esc close';
-
-    const all = isLog ? this.logLines() : this.listLines();
-    let start = 0;
-    if (all.length > height) {
-      const max = all.length - height;
-      if (isLog) {
-        if (this.follow) this.scroll = max;
-        start = Math.min(this.scroll, max);
-      } else
-        start = Math.min(Math.max(0, this.selectedIndex() - height + 1), max);
-    }
-    const body = all.slice(start, start + height);
-
-    const pad = (text: string) => truncateToWidth(text, inner, '…', true);
-    const frame = (label: string) => {
-      const total = inner + 4;
-      const text = truncateToWidth(label, total);
-      const filler = '─'.repeat(Math.max(0, total - visibleWidth(text)));
-      return theme.fg('borderMuted', text + filler);
-    };
-
-    return [
-      frame(`┌─ ${title} `),
-      ...body.map(
-        (line) =>
-          `${theme.fg('borderMuted', '│')} ${pad(line)} ${theme.fg('borderMuted', '│')}`,
-      ),
-      frame(`└─ ${hint} `),
-    ];
-  }
-}
-
-async function openRunPicker(ctx: ExtensionContext): Promise<void> {
-  if (ctx.mode !== 'tui') {
-    ctx.ui.notify('Subagent runs need the interactive TUI.', 'warning');
-    return;
-  }
-  if (listRuns().length === 0) {
-    ctx.ui.notify('No subagent runs yet.', 'info');
-    return;
-  }
-  await ctx.ui.custom<undefined>(
-    (tui, theme, _keybindings, done) => new RunPickerOverlay(tui, theme, done),
-    {
-      overlay: true,
-      overlayOptions: { anchor: 'center', width: '80%', maxHeight: '80%' },
-      onHandle: (handle) => handle.focus(),
-    },
-  );
 }
 
 async function mapWithConcurrencyLimit<TIn, TOut>(
@@ -790,11 +409,7 @@ async function runSingleAgent(
     step,
   };
 
-  const runEntry = startRun(currentResult);
-  let runFailed = true;
-
   const emitUpdate = () => {
-    notifyRunListeners();
     if (onUpdate) {
       onUpdate({
         content: [
@@ -910,13 +525,8 @@ async function runSingleAgent(
 
     currentResult.exitCode = exitCode;
     if (wasAborted) throw new Error('Subagent was aborted');
-    runFailed =
-      currentResult.exitCode !== 0 ||
-      currentResult.stopReason === 'error' ||
-      currentResult.stopReason === 'aborted';
     return currentResult;
   } finally {
-    endRun(runEntry, runFailed);
     if (tmpPromptPath)
       try {
         await fs.promises.unlink(tmpPromptPath);
@@ -992,32 +602,6 @@ const SubagentParams = Type.Object({
 });
 
 export default async function (pi: ExtensionAPI) {
-  let unbindRoster: (() => void) | null = null;
-
-  pi.on('session_start', (_event, ctx) => {
-    unbindRoster?.();
-    unbindRoster = ctx.mode === 'tui' ? bindRosterWidget(ctx.ui) : null;
-  });
-
-  pi.on('session_shutdown', () => {
-    unbindRoster?.();
-    unbindRoster = null;
-  });
-
-  pi.registerCommand('subagents', {
-    description: 'Browse subagent runs and their logs',
-    handler: async (_args, ctx) => {
-      await openRunPicker(ctx);
-    },
-  });
-
-  pi.registerShortcut('ctrl+shift+s', {
-    description: 'Browse subagent runs',
-    handler: async (ctx) => {
-      await openRunPicker(ctx);
-    },
-  });
-
   const loadTimeAgents = (await discoverAgents(process.cwd(), 'user')).agents;
   const agentList =
     loadTimeAgents.map((a) => `"${a.name}" (${a.description})`).join(', ') ||
