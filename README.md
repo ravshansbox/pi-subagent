@@ -16,6 +16,13 @@ Subagent extension for pi — delegate tasks to isolated subagent processes.
 
 Add your own agents to `~/.pi/agent/agents/` or `.pi/agents/`. See below.
 
+## Observability
+
+In the interactive TUI:
+
+- a roster widget below the editor lists the running subagents with turns, tokens, cost and the last tool call
+- `/subagents` or `Ctrl+Shift+S` opens a picker of recent runs; `Enter` shows the full log of the selected run, `Esc` goes back
+
 ## Requirements
 
 This package is meant to be used from an existing pi installation.
