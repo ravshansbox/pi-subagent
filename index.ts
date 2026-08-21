@@ -21,17 +21,22 @@ import type { Message } from '@earendil-works/pi-ai';
 import { clampThinkingLevel } from '@earendil-works/pi-ai';
 import {
   type ExtensionAPI,
+  type ExtensionContext,
   type ExtensionUIContext,
   getMarkdownTheme,
   type Theme,
   withFileMutationQueue,
 } from '@earendil-works/pi-coding-agent';
 import {
+  type Component,
   Container,
+  type Focusable,
   Markdown,
+  matchesKey,
   Spacer,
   Text,
   truncateToWidth,
+  type TUI,
 } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import { type AgentConfig, type AgentScope, discoverAgents } from './src/agents.ts';
@@ -43,6 +48,8 @@ const MAX_FINISHED_RUNS = 20;
 const ROSTER_WIDGET_KEY = 'subagent-roster';
 const ROSTER_REFRESH_MS = 100;
 const ROSTER_TOOL_WIDTH = 60;
+const PICKER_MIN_HEIGHT = 6;
+const PICKER_STDERR_LINES = 10;
 
 function formatTokens(count: number): string {
   if (count < 1000) return count.toString();
@@ -373,6 +380,206 @@ function bindRosterWidget(ui: ExtensionUIContext): () => void {
     if (timer) clearTimeout(timer);
     clear();
   };
+}
+
+function formatRunIcon(entry: RunEntry, theme: Theme): string {
+  if (entry.status === 'running') return theme.fg('warning', '▸');
+  return entry.status === 'failed'
+    ? theme.fg('error', '✗')
+    : theme.fg('success', '✓');
+}
+
+function formatRunElapsed(entry: RunEntry): string {
+  const end = entry.endedAt ?? Date.now();
+  return `${Math.round((end - entry.startedAt) / 1000)}s`;
+}
+
+class RunPickerOverlay implements Component, Focusable {
+  focused = false;
+  private view: 'list' | 'log' = 'list';
+  private selected = 0;
+  private scroll = 0;
+  private follow = true;
+  private readonly unsubscribe: () => void;
+
+  constructor(
+    private readonly tui: TUI,
+    private readonly theme: Theme,
+    private readonly done: (result: undefined) => void,
+  ) {
+    this.unsubscribe = subscribeRuns(() => tui.requestRender());
+  }
+
+  dispose(): void {
+    this.unsubscribe();
+  }
+
+  invalidate(): void {}
+
+  private viewportHeight(): number {
+    return Math.max(
+      PICKER_MIN_HEIGHT,
+      Math.floor(this.tui.terminal.rows * 0.7) - 4,
+    );
+  }
+
+  handleInput(data: string): void {
+    const entries = listRuns();
+    this.selected = Math.min(this.selected, Math.max(0, entries.length - 1));
+
+    if (matchesKey(data, 'escape')) {
+      if (this.view === 'log') {
+        this.view = 'list';
+        this.scroll = 0;
+        this.follow = true;
+      } else this.done(undefined);
+      this.tui.requestRender();
+      return;
+    }
+
+    if (this.view === 'list') {
+      if (matchesKey(data, 'up')) this.selected = Math.max(0, this.selected - 1);
+      else if (matchesKey(data, 'down'))
+        this.selected = Math.min(entries.length - 1, this.selected + 1);
+      else if (matchesKey(data, 'return') && entries.length > 0) {
+        this.view = 'log';
+        this.scroll = 0;
+        this.follow = true;
+      }
+      this.tui.requestRender();
+      return;
+    }
+
+    const height = this.viewportHeight();
+    const max = Math.max(0, this.logLines().length - height);
+    if (matchesKey(data, 'up')) this.scroll = Math.max(0, this.scroll - 1);
+    else if (matchesKey(data, 'down'))
+      this.scroll = Math.min(max, this.scroll + 1);
+    else if (matchesKey(data, 'pageUp'))
+      this.scroll = Math.max(0, this.scroll - height);
+    else if (matchesKey(data, 'pageDown'))
+      this.scroll = Math.min(max, this.scroll + height);
+    else if (matchesKey(data, 'home')) this.scroll = 0;
+    else if (matchesKey(data, 'end')) this.scroll = max;
+    this.follow = this.scroll >= max;
+    this.tui.requestRender();
+  }
+
+  private listLines(): string[] {
+    const entries = listRuns();
+    if (entries.length === 0)
+      return [this.theme.fg('muted', '(no subagent runs yet)')];
+    return entries.map((entry, index) => {
+      const marker =
+        index === this.selected ? this.theme.fg('accent', '›') : ' ';
+      const tool = formatLastToolCall(entry.result);
+      const stats = `${formatRunStats(entry.result)} ${formatRunElapsed(entry)}`;
+      let line =
+        `${marker} ${formatRunIcon(entry, this.theme)} ` +
+        this.theme.fg('accent', entry.result.agent) +
+        ` ${this.theme.fg('dim', stats)}`;
+      if (tool) line += `  ${this.theme.fg('muted', tool)}`;
+      return line;
+    });
+  }
+
+  private logLines(): string[] {
+    const entry = listRuns()[this.selected];
+    if (!entry) return [this.theme.fg('muted', '(no subagent runs yet)')];
+    const theme = this.theme;
+    const result = entry.result;
+    const lines: string[] = [
+      theme.fg('muted', 'Task: ') + theme.fg('dim', result.task),
+      '',
+    ];
+    for (const item of getDisplayItems(result.messages)) {
+      if (item.type === 'toolCall')
+        lines.push(
+          theme.fg('muted', '→ ') +
+            formatToolCall(item.name, item.args, theme.fg.bind(theme)),
+        );
+      else
+        for (const line of item.text.split('\n'))
+          lines.push(theme.fg('toolOutput', line));
+    }
+    if (result.errorMessage)
+      lines.push('', theme.fg('error', `Error: ${result.errorMessage}`));
+    if (result.stderr.trim()) {
+      lines.push('', theme.fg('error', 'stderr:'));
+      for (const line of result.stderr
+        .trim()
+        .split('\n')
+        .slice(-PICKER_STDERR_LINES))
+        lines.push(theme.fg('error', line));
+    }
+    const usage = formatUsageStats(
+      result.usage,
+      result.model,
+      result.thinkingLevel,
+      result.contextWindow,
+    );
+    if (usage) lines.push('', theme.fg('dim', usage));
+    return lines;
+  }
+
+  render(width: number): string[] {
+    const theme = this.theme;
+    const inner = Math.max(20, width - 4);
+    const height = this.viewportHeight();
+    const isLog = this.view === 'log';
+    const entries = listRuns();
+    const selectedEntry = entries[this.selected];
+
+    const title = isLog
+      ? `subagent log · ${selectedEntry?.result.agent ?? '(none)'}`
+      : `subagent runs · ${entries.length}`;
+    const hint = isLog
+      ? '↑↓ scroll · esc back'
+      : '↑↓ select · enter open · esc close';
+
+    const all = isLog ? this.logLines() : this.listLines();
+    let start = 0;
+    if (all.length > height) {
+      const max = all.length - height;
+      if (isLog) {
+        if (this.follow) this.scroll = max;
+        start = Math.min(this.scroll, max);
+      } else start = Math.min(Math.max(0, this.selected - height + 1), max);
+    }
+    const body = all.slice(start, start + height);
+
+    const pad = (text: string) => truncateToWidth(text, inner, '…', true);
+    const border = (text: string) =>
+      theme.fg('borderMuted', text.padEnd(inner + 4, '─'));
+
+    return [
+      border(`┌─ ${theme.fg('toolTitle', theme.bold(title))} `),
+      ...body.map(
+        (line) =>
+          `${theme.fg('borderMuted', '│')} ${pad(line)} ${theme.fg('borderMuted', '│')}`,
+      ),
+      border(`└─ ${theme.fg('muted', hint)} `),
+    ];
+  }
+}
+
+async function openRunPicker(ctx: ExtensionContext): Promise<void> {
+  if (ctx.mode !== 'tui') {
+    ctx.ui.notify('Subagent runs need the interactive TUI.', 'warning');
+    return;
+  }
+  if (listRuns().length === 0) {
+    ctx.ui.notify('No subagent runs yet.', 'info');
+    return;
+  }
+  await ctx.ui.custom<undefined>(
+    (tui, theme, _keybindings, done) => new RunPickerOverlay(tui, theme, done),
+    {
+      overlay: true,
+      overlayOptions: { anchor: 'center', width: '80%', maxHeight: '80%' },
+      onHandle: (handle) => handle.focus(),
+    },
+  );
 }
 
 async function mapWithConcurrencyLimit<TIn, TOut>(
@@ -776,6 +983,20 @@ export default async function (pi: ExtensionAPI) {
   pi.on('session_shutdown', () => {
     unbindRoster?.();
     unbindRoster = null;
+  });
+
+  pi.registerCommand('subagents', {
+    description: 'Browse subagent runs and their logs',
+    handler: async (_args, ctx) => {
+      await openRunPicker(ctx);
+    },
+  });
+
+  pi.registerShortcut('ctrl+shift+s', {
+    description: 'Browse subagent runs',
+    handler: async (ctx) => {
+      await openRunPicker(ctx);
+    },
   });
 
   const loadTimeAgents = (await discoverAgents(process.cwd(), 'user')).agents;
