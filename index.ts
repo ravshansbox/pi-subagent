@@ -21,16 +21,28 @@ import type { Message } from '@earendil-works/pi-ai';
 import { clampThinkingLevel } from '@earendil-works/pi-ai';
 import {
   type ExtensionAPI,
+  type ExtensionUIContext,
   getMarkdownTheme,
+  type Theme,
   withFileMutationQueue,
 } from '@earendil-works/pi-coding-agent';
-import { Container, Markdown, Spacer, Text } from '@earendil-works/pi-tui';
+import {
+  Container,
+  Markdown,
+  Spacer,
+  Text,
+  truncateToWidth,
+} from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import { type AgentConfig, type AgentScope, discoverAgents } from './src/agents.ts';
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
+const MAX_FINISHED_RUNS = 20;
+const ROSTER_WIDGET_KEY = 'subagent-roster';
+const ROSTER_REFRESH_MS = 100;
+const ROSTER_TOOL_WIDTH = 60;
 
 function formatTokens(count: number): string {
   if (count < 1000) return count.toString();
@@ -218,6 +230,149 @@ function getDisplayItems(messages: Message[]): DisplayItem[] {
     }
   }
   return items;
+}
+
+type RunStatus = 'running' | 'done' | 'failed';
+
+interface RunEntry {
+  id: string;
+  status: RunStatus;
+  startedAt: number;
+  endedAt?: number;
+  result: SingleResult;
+}
+
+let nextRunId = 1;
+const runs: RunEntry[] = [];
+const runListeners = new Set<() => void>();
+
+function notifyRunListeners(): void {
+  for (const listener of runListeners) listener();
+}
+
+function subscribeRuns(listener: () => void): () => void {
+  runListeners.add(listener);
+  return () => {
+    runListeners.delete(listener);
+  };
+}
+
+function listRuns(): readonly RunEntry[] {
+  return runs;
+}
+
+function startRun(result: SingleResult): RunEntry {
+  const entry: RunEntry = {
+    id: String(nextRunId++),
+    status: 'running',
+    startedAt: Date.now(),
+    result,
+  };
+  runs.push(entry);
+  let finished = runs.filter((run) => run.status !== 'running').length;
+  while (finished > MAX_FINISHED_RUNS) {
+    const oldest = runs.findIndex((run) => run.status !== 'running');
+    if (oldest === -1) break;
+    runs.splice(oldest, 1);
+    finished--;
+  }
+  notifyRunListeners();
+  return entry;
+}
+
+function endRun(entry: RunEntry, failed: boolean): void {
+  entry.status = failed ? 'failed' : 'done';
+  entry.endedAt = Date.now();
+  notifyRunListeners();
+}
+
+function getLastToolCall(
+  messages: Message[],
+): { name: string; args: Record<string, unknown> } | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role !== 'assistant') continue;
+    for (let j = msg.content.length - 1; j >= 0; j--) {
+      const part = msg.content[j];
+      if (part?.type === 'toolCall')
+        return { name: part.name, args: part.arguments };
+    }
+  }
+  return undefined;
+}
+
+function formatRunStats(result: SingleResult): string {
+  const parts: string[] = [
+    result.usage.turns
+      ? `${result.usage.turns} turn${result.usage.turns > 1 ? 's' : ''}`
+      : 'starting',
+  ];
+  if (result.usage.input) parts.push(`↑${formatTokens(result.usage.input)}`);
+  if (result.usage.output) parts.push(`↓${formatTokens(result.usage.output)}`);
+  if (result.usage.cost) parts.push(`$${result.usage.cost.toFixed(4)}`);
+  return parts.join(' ');
+}
+
+function formatLastToolCall(result: SingleResult): string | undefined {
+  const tool = getLastToolCall(result.messages);
+  if (!tool) return undefined;
+  const plain = formatToolCall(tool.name, tool.args, (_color, text) => text);
+  return truncateToWidth(plain.replace(/\s+/g, ' '), ROSTER_TOOL_WIDTH);
+}
+
+function renderRosterLines(theme: Theme): string[] {
+  const active = listRuns().filter((run) => run.status === 'running');
+  if (active.length === 0) return [];
+  const lines = [
+    theme.fg('toolTitle', theme.bold('subagent ')) +
+      theme.fg('muted', `${active.length} running`),
+  ];
+  for (const run of active) {
+    let line =
+      `${theme.fg('warning', '▸')} ` +
+      theme.fg('accent', run.result.agent) +
+      ` ${theme.fg('dim', formatRunStats(run.result))}`;
+    const tool = formatLastToolCall(run.result);
+    if (tool) line += `  ${theme.fg('muted', tool)}`;
+    lines.push(line);
+  }
+  return lines;
+}
+
+function bindRosterWidget(ui: ExtensionUIContext): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let shown = false;
+
+  const clear = () => {
+    if (!shown) return;
+    ui.setWidget(ROSTER_WIDGET_KEY, undefined);
+    shown = false;
+  };
+
+  const render = () => {
+    timer = null;
+    if (listRuns().every((run) => run.status !== 'running')) {
+      clear();
+      return;
+    }
+    ui.setWidget(
+      ROSTER_WIDGET_KEY,
+      (_tui, theme) => new Text(renderRosterLines(theme).join('\n'), 0, 0),
+      { placement: 'belowEditor' },
+    );
+    shown = true;
+  };
+
+  const unsubscribe = subscribeRuns(() => {
+    if (timer) return;
+    timer = setTimeout(render, ROSTER_REFRESH_MS);
+  });
+
+  return () => {
+    unsubscribe();
+    if (timer) clearTimeout(timer);
+    clear();
+  };
 }
 
 async function mapWithConcurrencyLimit<TIn, TOut>(
@@ -409,7 +564,11 @@ async function runSingleAgent(
     step,
   };
 
+  const runEntry = startRun(currentResult);
+  let runFailed = true;
+
   const emitUpdate = () => {
+    notifyRunListeners();
     if (onUpdate) {
       onUpdate({
         content: [
@@ -525,8 +684,13 @@ async function runSingleAgent(
 
     currentResult.exitCode = exitCode;
     if (wasAborted) throw new Error('Subagent was aborted');
+    runFailed =
+      currentResult.exitCode !== 0 ||
+      currentResult.stopReason === 'error' ||
+      currentResult.stopReason === 'aborted';
     return currentResult;
   } finally {
+    endRun(runEntry, runFailed);
     if (tmpPromptPath)
       try {
         await fs.promises.unlink(tmpPromptPath);
@@ -602,6 +766,18 @@ const SubagentParams = Type.Object({
 });
 
 export default async function (pi: ExtensionAPI) {
+  let unbindRoster: (() => void) | null = null;
+
+  pi.on('session_start', (_event, ctx) => {
+    unbindRoster?.();
+    unbindRoster = ctx.mode === 'tui' ? bindRosterWidget(ctx.ui) : null;
+  });
+
+  pi.on('session_shutdown', () => {
+    unbindRoster?.();
+    unbindRoster = null;
+  });
+
   const loadTimeAgents = (await discoverAgents(process.cwd(), 'user')).agents;
   const agentList =
     loadTimeAgents.map((a) => `"${a.name}" (${a.description})`).join(', ') ||
