@@ -37,6 +37,7 @@ import {
   Text,
   truncateToWidth,
   type TUI,
+  visibleWidth,
 } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import { type AgentConfig, type AgentScope, discoverAgents } from './src/agents.ts';
@@ -397,7 +398,7 @@ function formatRunElapsed(entry: RunEntry): string {
 class RunPickerOverlay implements Component, Focusable {
   focused = false;
   private view: 'list' | 'log' = 'list';
-  private selected = 0;
+  private selectedId: string | null = null;
   private scroll = 0;
   private follow = true;
   private readonly unsubscribe: () => void;
@@ -407,7 +408,17 @@ class RunPickerOverlay implements Component, Focusable {
     private readonly theme: Theme,
     private readonly done: (result: undefined) => void,
   ) {
+    this.selectedId = listRuns().at(-1)?.id ?? null;
     this.unsubscribe = subscribeRuns(() => tui.requestRender());
+  }
+
+  private selectedIndex(): number {
+    const index = listRuns().findIndex((run) => run.id === this.selectedId);
+    return index === -1 ? 0 : index;
+  }
+
+  private selectedRun(): RunEntry | undefined {
+    return listRuns().find((run) => run.id === this.selectedId);
   }
 
   dispose(): void {
@@ -425,9 +436,9 @@ class RunPickerOverlay implements Component, Focusable {
 
   handleInput(data: string): void {
     const entries = listRuns();
-    this.selected = Math.min(this.selected, Math.max(0, entries.length - 1));
+    if (!this.selectedRun()) this.selectedId = entries.at(-1)?.id ?? null;
 
-    if (matchesKey(data, 'escape')) {
+    if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
       if (this.view === 'log') {
         this.view = 'list';
         this.scroll = 0;
@@ -438,9 +449,12 @@ class RunPickerOverlay implements Component, Focusable {
     }
 
     if (this.view === 'list') {
-      if (matchesKey(data, 'up')) this.selected = Math.max(0, this.selected - 1);
+      const index = this.selectedIndex();
+      if (matchesKey(data, 'up'))
+        this.selectedId = entries[Math.max(0, index - 1)]?.id ?? null;
       else if (matchesKey(data, 'down'))
-        this.selected = Math.min(entries.length - 1, this.selected + 1);
+        this.selectedId =
+          entries[Math.min(entries.length - 1, index + 1)]?.id ?? null;
       else if (matchesKey(data, 'return') && entries.length > 0) {
         this.view = 'log';
         this.scroll = 0;
@@ -469,9 +483,9 @@ class RunPickerOverlay implements Component, Focusable {
     const entries = listRuns();
     if (entries.length === 0)
       return [this.theme.fg('muted', '(no subagent runs yet)')];
-    return entries.map((entry, index) => {
+    return entries.map((entry) => {
       const marker =
-        index === this.selected ? this.theme.fg('accent', '›') : ' ';
+        entry.id === this.selectedId ? this.theme.fg('accent', '›') : ' ';
       const tool = formatLastToolCall(entry.result);
       const stats = `${formatRunStats(entry.result)} ${formatRunElapsed(entry)}`;
       let line =
@@ -484,7 +498,7 @@ class RunPickerOverlay implements Component, Focusable {
   }
 
   private logLines(): string[] {
-    const entry = listRuns()[this.selected];
+    const entry = this.selectedRun();
     if (!entry) return [this.theme.fg('muted', '(no subagent runs yet)')];
     const theme = this.theme;
     const result = entry.result;
@@ -524,11 +538,11 @@ class RunPickerOverlay implements Component, Focusable {
 
   render(width: number): string[] {
     const theme = this.theme;
-    const inner = Math.max(20, width - 4);
+    const inner = Math.max(1, width - 4);
     const height = this.viewportHeight();
     const isLog = this.view === 'log';
     const entries = listRuns();
-    const selectedEntry = entries[this.selected];
+    const selectedEntry = this.selectedRun();
 
     const title = isLog
       ? `subagent log · ${selectedEntry?.result.agent ?? '(none)'}`
@@ -544,21 +558,26 @@ class RunPickerOverlay implements Component, Focusable {
       if (isLog) {
         if (this.follow) this.scroll = max;
         start = Math.min(this.scroll, max);
-      } else start = Math.min(Math.max(0, this.selected - height + 1), max);
+      } else
+        start = Math.min(Math.max(0, this.selectedIndex() - height + 1), max);
     }
     const body = all.slice(start, start + height);
 
     const pad = (text: string) => truncateToWidth(text, inner, '…', true);
-    const border = (text: string) =>
-      theme.fg('borderMuted', text.padEnd(inner + 4, '─'));
+    const frame = (label: string) => {
+      const total = inner + 4;
+      const text = truncateToWidth(label, total);
+      const filler = '─'.repeat(Math.max(0, total - visibleWidth(text)));
+      return theme.fg('borderMuted', text + filler);
+    };
 
     return [
-      border(`┌─ ${theme.fg('toolTitle', theme.bold(title))} `),
+      frame(`┌─ ${title} `),
       ...body.map(
         (line) =>
           `${theme.fg('borderMuted', '│')} ${pad(line)} ${theme.fg('borderMuted', '│')}`,
       ),
-      border(`└─ ${theme.fg('muted', hint)} `),
+      frame(`└─ ${hint} `),
     ];
   }
 }
