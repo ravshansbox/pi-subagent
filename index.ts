@@ -445,10 +445,8 @@ export default function (pi: ExtensionAPI) {
           const step = params.chain[i]!;
           const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
 
-          // Create update callback that includes all previous results
           const chainUpdate: OnUpdateCallback | undefined = onUpdate
             ? (partial) => {
-                // Combine completed results with current streaming result
                 const currentResult = partial.details?.results[0];
                 if (currentResult) {
                   const allResults = [...results, currentResult];
@@ -512,15 +510,13 @@ export default function (pi: ExtensionAPI) {
             details: makeDetails('parallel')([]),
           };
 
-        // Track all results for streaming updates
         const allResults: SingleResult[] = new Array(params.tasks.length);
 
-        // Initialize placeholder results
         for (let i = 0; i < params.tasks.length; i++) {
           allResults[i] = {
             label: `task ${i + 1}`,
             task: params.tasks[i]!.task,
-            exitCode: -1, // -1 = still running
+            exitCode: -1,
             messages: [],
             stderr: '',
             usage: {
@@ -563,7 +559,6 @@ export default function (pi: ExtensionAPI) {
               t.cwd,
               undefined,
               signal,
-              // Per-task update callback
               (partial) => {
                 if (partial.details?.results[0]) {
                   allResults[index] = partial.details.results[0];
@@ -639,7 +634,6 @@ export default function (pi: ExtensionAPI) {
           theme.fg('accent', `chain (${args.chain.length} steps)`);
         for (let i = 0; i < Math.min(args.chain.length, 3); i++) {
           const step = args.chain[i]!;
-          // Clean up {previous} placeholder for display
           const cleanTask = step.task.replace(/\{previous\}/g, '').trim();
           const preview = cleanTask.length > 40 ? `${cleanTask.slice(0, 40)}...` : cleanTask;
           text += '\n  ' + theme.fg('muted', `${i + 1}.`) + theme.fg('dim', ` ${preview}`);
@@ -801,7 +795,6 @@ export default function (pi: ExtensionAPI) {
               new Text(theme.fg('muted', 'Task: ') + theme.fg('dim', r.task), 0, 0),
             );
 
-            // Show tool calls
             for (const item of displayItems) {
               if (item.type === 'toolCall') {
                 container.addChild(
@@ -815,7 +808,6 @@ export default function (pi: ExtensionAPI) {
               }
             }
 
-            // Show final output as markdown
             if (finalOutput) {
               container.addChild(new Spacer(1));
               container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
@@ -833,7 +825,6 @@ export default function (pi: ExtensionAPI) {
           return container;
         }
 
-        // Collapsed view
         let text =
           icon +
           ' ' +
@@ -893,7 +884,6 @@ export default function (pi: ExtensionAPI) {
               new Text(theme.fg('muted', 'Task: ') + theme.fg('dim', r.task), 0, 0),
             );
 
-            // Show tool calls
             for (const item of displayItems) {
               if (item.type === 'toolCall') {
                 container.addChild(
@@ -907,7 +897,6 @@ export default function (pi: ExtensionAPI) {
               }
             }
 
-            // Show final output as markdown
             if (finalOutput) {
               container.addChild(new Spacer(1));
               container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
@@ -925,7 +914,6 @@ export default function (pi: ExtensionAPI) {
           return container;
         }
 
-        // Collapsed view (or still running)
         let text = `${icon} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`;
         for (const r of details.results) {
           const rIcon =
