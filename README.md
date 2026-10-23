@@ -44,7 +44,7 @@ Pi looks for agents in:
 
 Project agents override user agents with the same name. Pi asks before running project agents in untrusted projects.
 
-The sample agents in [`agents/`](agents) and workflow prompts in [`prompts/`](prompts) are not installed with the package. Copy them to `~/.pi/agent/agents/` and `~/.pi/agent/prompts/` to use them.
+The sample worker agent in [`agents/`](agents) and workflow prompts in [`prompts/`](prompts) are not installed with the package. Copy them to `~/.pi/agent/agents/` and `~/.pi/agent/prompts/` to use them.
 
 ## Development
 
