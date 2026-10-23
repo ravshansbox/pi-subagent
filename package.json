@@ -1,6 +1,6 @@
 {
   "name": "@ravshansbox/pi-subagent",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Subagent extension for pi",
   "license": "MIT",
   "type": "module",
