@@ -117,6 +117,17 @@ test('passes the parent provider, model and thinking level to chained subagents'
   for (const args of calls) assertInherits(args);
 });
 
+test('inserts previous output literally in chained tasks', async () => {
+  const result = await getTool().execute(
+    '1',
+    { chain: [{ task: "costs $& and $'" }, { task: 'after {previous}' }] },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.equal(result.content[0]?.text, "done: Task: after done: Task: costs $& and $'");
+});
+
 test('does not offer agent selection', () => {
   const properties = Object.keys(getTool().parameters.properties);
   assert.deepEqual(properties.sort(), ['chain', 'cwd', 'task', 'tasks']);
