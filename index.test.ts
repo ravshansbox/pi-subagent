@@ -24,6 +24,10 @@ fs.writeFileSync(
   `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
+if (args[args.length - 1].includes('ignore-term')) {
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 1000);
+}
 fs.appendFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args) + '\\n');
 const task = args[args.length - 1];
 if (task.includes('crash')) process.kill(process.pid, 'SIGKILL');
@@ -151,6 +155,14 @@ test('keeps multi-byte characters split across output chunks', async () => {
 test('reports a subagent killed by a signal as failed', async () => {
   const result = await getTool().execute('1', { task: 'crash' }, undefined, undefined, ctx);
   assert.equal(result.isError, true);
+});
+
+test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {
+  const controller = new AbortController();
+  const run = getTool().execute('1', { task: 'ignore-term' }, controller.signal, undefined, ctx);
+  while (!fs.existsSync(argsFile)) await new Promise((r) => setTimeout(r, 20));
+  controller.abort();
+  await assert.rejects(run, /aborted/);
 });
 
 test('does not offer agent selection', () => {
