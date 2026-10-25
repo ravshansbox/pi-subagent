@@ -32,7 +32,15 @@ const message = {
   usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
   stopReason: 'stop',
 };
-console.log(JSON.stringify({ type: 'message_end', message }));
+const line = Buffer.from(JSON.stringify({ type: 'message_end', message }) + '\\n');
+if (task.includes('split-utf8')) {
+  const cut = line.indexOf(Buffer.from('é')) + 1;
+  process.stdout.write(line.subarray(0, cut), () => {
+    setTimeout(() => process.stdout.write(line.subarray(cut)), 50);
+  });
+} else {
+  process.stdout.write(line);
+}
 `,
   { mode: 0o755 },
 );
@@ -126,6 +134,17 @@ test('inserts previous output literally in chained tasks', async () => {
     ctx,
   );
   assert.equal(result.content[0]?.text, "done: Task: after done: Task: costs $& and $'");
+});
+
+test('keeps multi-byte characters split across output chunks', async () => {
+  const result = await getTool().execute(
+    '1',
+    { task: 'split-utf8 café' },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.equal(result.content[0]?.text, 'done: Task: split-utf8 café');
 });
 
 test('does not offer agent selection', () => {

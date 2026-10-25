@@ -301,6 +301,8 @@ async function runSingleAgent(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let buffer = '';
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
 
     const processLine = (line: string) => {
       if (!line.trim()) return;
