@@ -354,7 +354,7 @@ async function runSingleAgent(
 
     proc.on('close', (code) => {
       if (buffer.trim()) processLine(buffer);
-      resolve(code ?? 0);
+      resolve(code ?? 1);
     });
 
     proc.on('error', () => {

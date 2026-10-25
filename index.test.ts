@@ -26,6 +26,7 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args) + '\\n');
 const task = args[args.length - 1];
+if (task.includes('crash')) process.kill(process.pid, 'SIGKILL');
 const message = {
   role: 'assistant',
   content: [{ type: 'text', text: 'done: ' + task }],
@@ -145,6 +146,11 @@ test('keeps multi-byte characters split across output chunks', async () => {
     ctx,
   );
   assert.equal(result.content[0]?.text, 'done: Task: split-utf8 café');
+});
+
+test('reports a subagent killed by a signal as failed', async () => {
+  const result = await getTool().execute('1', { task: 'crash' }, undefined, undefined, ctx);
+  assert.equal(result.isError, true);
 });
 
 test('does not offer agent selection', () => {
