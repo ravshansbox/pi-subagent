@@ -12,7 +12,7 @@ type Tool = {
     id: string,
     params: Record<string, unknown>,
     signal: AbortSignal | undefined,
-    onUpdate: undefined,
+    onUpdate: ((partial: { content: { text: string }[] }) => void) | undefined,
     ctx: unknown,
   ) => Promise<{
     content: { type: string; text: string }[];
@@ -219,6 +219,18 @@ test('truncates long parallel output without splitting characters', async () => 
     ctx,
   );
   assert.match(result.content[0]?.text ?? '', /\] completed\n\na😀+\n\n\[Output truncated/u);
+});
+
+test('reports a parallel task as running until its process exits', async () => {
+  const updates: string[] = [];
+  await getTool().execute(
+    '1',
+    { tasks: [{ task: 'one' }] },
+    undefined,
+    (partial) => updates.push(partial.content[0]!.text),
+    ctx,
+  );
+  assert.equal(updates[0], 'Parallel: 0/1 done, 1 running...');
 });
 
 test('shows a chain step that stopped with an error as failed', () => {

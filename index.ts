@@ -556,7 +556,7 @@ export default function (pi: ExtensionAPI) {
               signal,
               (partial) => {
                 if (partial.details?.results[0]) {
-                  allResults[index] = partial.details.results[0];
+                  allResults[index] = { ...partial.details.results[0], exitCode: -1 };
                   emitParallelUpdate();
                 }
               },
