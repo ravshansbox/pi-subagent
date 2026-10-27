@@ -14,7 +14,11 @@ type Tool = {
     signal: AbortSignal | undefined,
     onUpdate: undefined,
     ctx: unknown,
-  ) => Promise<{ content: { type: string; text: string }[]; isError?: boolean }>;
+  ) => Promise<{
+    content: { type: string; text: string }[];
+    details?: unknown;
+    isError?: boolean;
+  }>;
   renderResult: (
     result: unknown,
     options: { expanded: boolean },
@@ -61,7 +65,7 @@ process.argv[1] = path.join(binDir, 'missing');
 const ctx = {
   cwd: binDir,
   hasUI: false,
-  model: { provider: 'anthropic', id: 'claude-opus-5-5' },
+  model: { provider: 'anthropic', id: 'claude-opus-5-5', contextWindow: 200000 },
   thinkingLevel: 'medium',
   isProjectTrusted: () => true,
 };
@@ -79,7 +83,7 @@ function getTool(): Tool {
 }
 
 const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
-const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 };
 
 function renderResults(mode: string, results: Record<string, unknown>[]): string[] {
   const details = {
@@ -270,6 +274,30 @@ test('shows the first line of the error on a failed collapsed subagent', () => {
     },
   ]);
   assert.deepEqual(lines, ['✗ subagent [error] boom']);
+});
+
+test('shows context percentage and short model name without cost', () => {
+  const lines = renderResults('single', [
+    {
+      label: 'subagent',
+      exitCode: 0,
+      usage: { ...usedUsage, cost: 0.5, contextTokens: 24000 },
+      contextWindow: 200000,
+      model: 'anthropic/claude-opus-5-5',
+      messages: messagesWith('a.ts'),
+    },
+  ]);
+  assert.deepEqual(lines, ['✓ subagent → read a.ts · 2 turns ↑1.2k ↓300 12%/200k opus-5-5']);
+});
+
+test('renders the parent context window for a finished subagent', async () => {
+  const tool = getTool();
+  const result = await tool.execute('1', { task: 'find bugs' }, undefined, undefined, ctx);
+  const lines = tool
+    .renderResult(result, { expanded: false }, plainTheme)
+    .render(200)
+    .map((line) => line.trimEnd());
+  assert.deepEqual(lines, ['✓ subagent · 1 turn ↑1 ↓1 0%/200k opus-5-5']);
 });
 
 test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {

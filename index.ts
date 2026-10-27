@@ -30,11 +30,11 @@ function formatUsageStats(
     output: number;
     cacheRead: number;
     cacheWrite: number;
-    cost: number;
     contextTokens?: number;
     turns?: number;
   },
   model?: string,
+  contextWindow?: number,
 ): string {
   const parts: string[] = [];
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
@@ -42,11 +42,11 @@ function formatUsageStats(
   if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
   if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
   if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
-  if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
-  if (usage.contextTokens && usage.contextTokens > 0) {
-    parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
+  if (usage.contextTokens && contextWindow) {
+    const percent = ((usage.contextTokens / contextWindow) * 100).toFixed(0);
+    parts.push(`${percent}%/${formatTokens(contextWindow)}`);
   }
-  if (model) parts.push(model);
+  if (model) parts.push(model.replace(/^.*\//, '').replace(/^claude-/, ''));
   return parts.join(' ');
 }
 
@@ -124,7 +124,6 @@ interface UsageStats {
   output: number;
   cacheRead: number;
   cacheWrite: number;
-  cost: number;
   contextTokens: number;
   turns: number;
 }
@@ -137,6 +136,7 @@ interface SingleResult {
   stderr: string;
   usage: UsageStats;
   model?: string | undefined;
+  contextWindow?: number | undefined;
   stopReason?: string | undefined;
   errorMessage?: string | undefined;
   step?: number | undefined;
@@ -240,6 +240,7 @@ interface ParentSettings {
   provider?: string | undefined;
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
+  contextWindow?: number | undefined;
 }
 
 async function runSingleAgent(
@@ -271,11 +272,11 @@ async function runSingleAgent(
       output: 0,
       cacheRead: 0,
       cacheWrite: 0,
-      cost: 0,
       contextTokens: 0,
       turns: 0,
     },
     model,
+    contextWindow: parent.contextWindow,
     step,
   };
 
@@ -323,7 +324,6 @@ async function runSingleAgent(
             currentResult.usage.output += usage.output || 0;
             currentResult.usage.cacheRead += usage.cacheRead || 0;
             currentResult.usage.cacheWrite += usage.cacheWrite || 0;
-            currentResult.usage.cost += usage.cost?.total || 0;
             currentResult.usage.contextTokens = usage.totalTokens || 0;
           }
           if (!currentResult.model && msg.model) currentResult.model = msg.model;
@@ -410,6 +410,7 @@ export default function (pi: ExtensionAPI) {
       const parent: ParentSettings = {
         provider: ctx.model?.provider,
         model: ctx.model?.id,
+        contextWindow: ctx.model?.contextWindow,
         thinkingLevel: ctx.thinkingLevel,
       };
 
@@ -519,7 +520,6 @@ export default function (pi: ExtensionAPI) {
               output: 0,
               cacheRead: 0,
               cacheWrite: 0,
-              cost: 0,
               contextTokens: 0,
               turns: 0,
             },
@@ -685,7 +685,7 @@ export default function (pi: ExtensionAPI) {
           .at(-1);
         if (lastToolCall)
           text += ` ${theme.fg('muted', '→ ')}${formatToolCall(lastToolCall.name, lastToolCall.args, theme.fg.bind(theme))}`;
-        return withUsage(text, formatUsageStats(r.usage, r.model));
+        return withUsage(text, formatUsageStats(r.usage, r.model, r.contextWindow));
       };
 
       const collapsedList = (header: string, results: SingleResult[]) => {
@@ -736,7 +736,7 @@ export default function (pi: ExtensionAPI) {
               container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
             }
           }
-          const usageStr = formatUsageStats(r.usage, r.model);
+          const usageStr = formatUsageStats(r.usage, r.model, r.contextWindow);
           if (usageStr) {
             container.addChild(new Spacer(1));
             container.addChild(new Text(theme.fg('dim', usageStr), 0, 0));
@@ -752,13 +752,12 @@ export default function (pi: ExtensionAPI) {
       }
 
       const aggregateUsage = (results: SingleResult[]) => {
-        const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+        const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 };
         for (const r of results) {
           total.input += r.usage.input;
           total.output += r.usage.output;
           total.cacheRead += r.usage.cacheRead;
           total.cacheWrite += r.usage.cacheWrite;
-          total.cost += r.usage.cost;
           total.turns += r.usage.turns;
         }
         return total;
@@ -815,7 +814,7 @@ export default function (pi: ExtensionAPI) {
               container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
             }
 
-            const stepUsage = formatUsageStats(r.usage, r.model);
+            const stepUsage = formatUsageStats(r.usage, r.model, r.contextWindow);
             if (stepUsage) container.addChild(new Text(theme.fg('dim', stepUsage), 0, 0));
           }
 
@@ -898,7 +897,7 @@ export default function (pi: ExtensionAPI) {
               container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
             }
 
-            const taskUsage = formatUsageStats(r.usage, r.model);
+            const taskUsage = formatUsageStats(r.usage, r.model, r.contextWindow);
             if (taskUsage) container.addChild(new Text(theme.fg('dim', taskUsage), 0, 0));
           }
 
