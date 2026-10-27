@@ -10,12 +10,11 @@ import {
   getMarkdownTheme,
   type ThemeColor,
 } from '@earendil-works/pi-coding-agent';
-import { Container, Markdown, Spacer, Text } from '@earendil-works/pi-tui';
+import { Container, Markdown, Spacer, Text, TruncatedText } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
-const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
 
 function formatTokens(count: number): string {
@@ -663,20 +662,40 @@ export default function (pi: ExtensionAPI) {
 
       const mdTheme = getMarkdownTheme();
 
-      const renderDisplayItems = (items: DisplayItem[], limit?: number) => {
-        const toShow = limit ? items.slice(-limit) : items;
-        const skipped = limit && items.length > limit ? items.length - limit : 0;
-        let text = '';
-        if (skipped > 0) text += theme.fg('muted', `... ${skipped} earlier items\n`);
-        for (const item of toShow) {
-          if (item.type === 'text') {
-            const preview = expanded ? item.text : item.text.split('\n').slice(0, 3).join('\n');
-            text += `${theme.fg('toolOutput', preview)}\n`;
-          } else {
-            text += `${theme.fg('muted', '→ ') + formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
-          }
+      const resultIcon = (r: SingleResult) =>
+        r.exitCode === -1
+          ? theme.fg('warning', '⏳')
+          : isFailedResult(r)
+            ? theme.fg('error', '✗')
+            : theme.fg('success', '✓');
+
+      const withUsage = (text: string, usageStr: string) =>
+        usageStr ? text + theme.fg('dim', ` · ${usageStr}`) : text;
+
+      const collapsedLine = (r: SingleResult, label: string) => {
+        let text = `${resultIcon(r)} ${label}`;
+        if (isFailedResult(r) && r.exitCode !== -1) {
+          if (r.stopReason) text += ` ${theme.fg('error', `[${r.stopReason}]`)}`;
+          const error = (r.errorMessage || r.stderr).trim().split('\n')[0];
+          if (error) text += ` ${theme.fg('error', error)}`;
+          return text;
         }
-        return text.trimEnd();
+        const lastToolCall = getDisplayItems(r.messages)
+          .filter((item) => item.type === 'toolCall')
+          .at(-1);
+        if (lastToolCall)
+          text += ` ${theme.fg('muted', '→ ')}${formatToolCall(lastToolCall.name, lastToolCall.args, theme.fg.bind(theme))}`;
+        return withUsage(text, formatUsageStats(r.usage, r.model));
+      };
+
+      const collapsedList = (header: string, results: SingleResult[]) => {
+        const container = new Container();
+        container.addChild(new TruncatedText(header, 0, 0));
+        for (const r of results)
+          container.addChild(
+            new TruncatedText(`  ${collapsedLine(r, theme.fg('accent', r.label))}`, 0, 0),
+          );
+        return container;
       };
 
       if (details.mode === 'single' && details.results.length === 1) {
@@ -725,18 +744,11 @@ export default function (pi: ExtensionAPI) {
           return container;
         }
 
-        let text = `${icon} ${theme.fg('toolTitle', theme.bold(r.label))}`;
-        if (isError && r.stopReason) text += ` ${theme.fg('error', `[${r.stopReason}]`)}`;
-        if (isError && r.errorMessage) text += `\n${theme.fg('error', `Error: ${r.errorMessage}`)}`;
-        else if (displayItems.length === 0) text += `\n${theme.fg('muted', '(no output)')}`;
-        else {
-          text += `\n${renderDisplayItems(displayItems, COLLAPSED_ITEM_COUNT)}`;
-          if (displayItems.length > COLLAPSED_ITEM_COUNT)
-            text += `\n${theme.fg('muted', '(Ctrl+O to expand)')}`;
-        }
-        const usageStr = formatUsageStats(r.usage, r.model);
-        if (usageStr) text += `\n${theme.fg('dim', usageStr)}`;
-        return new Text(text, 0, 0);
+        return new TruncatedText(
+          collapsedLine(r, theme.fg('toolTitle', theme.bold(r.label))),
+          0,
+          0,
+        );
       }
 
       const aggregateUsage = (results: SingleResult[]) => {
@@ -815,22 +827,16 @@ export default function (pi: ExtensionAPI) {
           return container;
         }
 
-        let text =
+        const header =
           icon +
           ' ' +
           theme.fg('toolTitle', theme.bold('chain ')) +
           theme.fg('accent', `${successCount}/${details.results.length} steps`);
-        for (const r of details.results) {
-          const rIcon = isFailedResult(r) ? theme.fg('error', '✗') : theme.fg('success', '✓');
-          const displayItems = getDisplayItems(r.messages);
-          text += `\n\n${theme.fg('muted', `─── Step ${r.step}`)} ${rIcon}`;
-          if (displayItems.length === 0) text += `\n${theme.fg('muted', '(no output)')}`;
-          else text += `\n${renderDisplayItems(displayItems, 5)}`;
-        }
-        const usageStr = formatUsageStats(aggregateUsage(details.results));
-        if (usageStr) text += `\n\n${theme.fg('dim', `Total: ${usageStr}`)}`;
-        text += `\n${theme.fg('muted', '(Ctrl+O to expand)')}`;
-        return new Text(text, 0, 0);
+        const totalUsage = formatUsageStats(aggregateUsage(details.results));
+        return collapsedList(
+          withUsage(header, totalUsage && `Total: ${totalUsage}`),
+          details.results,
+        );
       }
 
       if (details.mode === 'parallel') {
@@ -904,26 +910,12 @@ export default function (pi: ExtensionAPI) {
           return container;
         }
 
-        let text = `${icon} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`;
-        for (const r of details.results) {
-          const rIcon =
-            r.exitCode === -1
-              ? theme.fg('warning', '⏳')
-              : isFailedResult(r)
-                ? theme.fg('error', '✗')
-                : theme.fg('success', '✓');
-          const displayItems = getDisplayItems(r.messages);
-          text += `\n\n${theme.fg('muted', '─── ')}${theme.fg('accent', r.label)} ${rIcon}`;
-          if (displayItems.length === 0)
-            text += `\n${theme.fg('muted', r.exitCode === -1 ? '(running...)' : '(no output)')}`;
-          else text += `\n${renderDisplayItems(displayItems, 5)}`;
-        }
-        if (!isRunning) {
-          const usageStr = formatUsageStats(aggregateUsage(details.results));
-          if (usageStr) text += `\n\n${theme.fg('dim', `Total: ${usageStr}`)}`;
-        }
-        if (!expanded) text += `\n${theme.fg('muted', '(Ctrl+O to expand)')}`;
-        return new Text(text, 0, 0);
+        const header = `${icon} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`;
+        const totalUsage = isRunning ? '' : formatUsageStats(aggregateUsage(details.results));
+        return collapsedList(
+          withUsage(header, totalUsage && `Total: ${totalUsage}`),
+          details.results,
+        );
       }
 
       const text = result.content[0];

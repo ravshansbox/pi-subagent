@@ -81,15 +81,33 @@ function getTool(): Tool {
 const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
 
-function renderResult(mode: string, result: Record<string, unknown>): string {
+function renderResults(mode: string, results: Record<string, unknown>[]): string[] {
   const details = {
     mode,
-    results: [{ label: 'step 1', task: 't', step: 1, stderr: '', usage: emptyUsage, ...result }],
+    results: results.map((result) => ({
+      label: 'step 1',
+      task: 't',
+      step: 1,
+      stderr: '',
+      usage: emptyUsage,
+      ...result,
+    })),
   };
   return getTool()
     .renderResult({ content: [], details }, { expanded: false }, plainTheme)
     .render(200)
-    .join('\n');
+    .map((line) => line.trimEnd());
+}
+
+function renderResult(mode: string, result: Record<string, unknown>): string {
+  return renderResults(mode, [result]).join('\n');
+}
+
+const usedUsage = { ...emptyUsage, input: 1200, output: 300, turns: 2 };
+
+function messagesWith(...paths: string[]) {
+  const toolCalls = paths.map((p) => ({ type: 'toolCall', name: 'read', arguments: { path: p } }));
+  return [{ role: 'assistant', content: [{ type: 'text', text: 'line 1\nline 2' }, ...toolCalls] }];
 }
 
 function childArgs(): string[][] {
@@ -208,6 +226,50 @@ test('renders a tool call whose path is not a string', () => {
   const toolCall = { type: 'toolCall', name: 'read', arguments: { path: 42 } };
   const messages = [{ role: 'assistant', content: [toolCall] }];
   assert.match(renderResult('single', { exitCode: 0, messages }), /read 42/);
+});
+
+test('collapses a single subagent to one line with its last tool call and usage', () => {
+  const lines = renderResults('single', [
+    { label: 'subagent', exitCode: 0, usage: usedUsage, messages: messagesWith('a.ts', 'b.ts') },
+  ]);
+  assert.deepEqual(lines, ['✓ subagent → read b.ts · 2 turns ↑1.2k ↓300']);
+});
+
+test('collapses parallel tasks to a header and one line per task', () => {
+  const lines = renderResults('parallel', [
+    { label: 'task 1', exitCode: 0, usage: usedUsage, messages: messagesWith('a.ts') },
+    { label: 'task 2', exitCode: -1, usage: emptyUsage, messages: [] },
+  ]);
+  assert.deepEqual(lines, [
+    '⏳ parallel 1/2 done, 1 running',
+    '  ✓ task 1 → read a.ts · 2 turns ↑1.2k ↓300',
+    '  ⏳ task 2',
+  ]);
+});
+
+test('collapses chain steps to a header with totals and one line per step', () => {
+  const lines = renderResults('chain', [
+    { label: 'step 1', exitCode: 0, usage: usedUsage, messages: messagesWith('a.ts') },
+    { label: 'step 2', exitCode: 0, usage: usedUsage, messages: messagesWith('b.ts') },
+  ]);
+  assert.deepEqual(lines, [
+    '✓ chain 2/2 steps · Total: 4 turns ↑2.4k ↓600',
+    '  ✓ step 1 → read a.ts · 2 turns ↑1.2k ↓300',
+    '  ✓ step 2 → read b.ts · 2 turns ↑1.2k ↓300',
+  ]);
+});
+
+test('shows the first line of the error on a failed collapsed subagent', () => {
+  const lines = renderResults('single', [
+    {
+      label: 'subagent',
+      exitCode: 1,
+      stopReason: 'error',
+      errorMessage: 'boom\nstack',
+      messages: messagesWith('a.ts'),
+    },
+  ]);
+  assert.deepEqual(lines, ['✗ subagent [error] boom']);
 });
 
 test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {
