@@ -175,10 +175,9 @@ function truncateParallelOutput(output: string): string {
   const byteLength = Buffer.byteLength(output, 'utf8');
   if (byteLength <= PER_TASK_OUTPUT_CAP) return output;
 
-  let truncated = output.slice(0, PER_TASK_OUTPUT_CAP);
-  while (Buffer.byteLength(truncated, 'utf8') > PER_TASK_OUTPUT_CAP) {
-    truncated = truncated.slice(0, -1);
-  }
+  const truncated = Buffer.from(output)
+    .toString('utf8', 0, PER_TASK_OUTPUT_CAP)
+    .replace(/\uFFFD$/, '');
   return `${truncated}\n\n[Output truncated: ${byteLength - Buffer.byteLength(truncated, 'utf8')} bytes omitted. Full output preserved in tool details.]`;
 }
 

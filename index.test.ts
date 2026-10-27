@@ -33,7 +33,7 @@ const task = args[args.length - 1];
 if (task.includes('crash')) process.kill(process.pid, 'SIGKILL');
 const message = {
   role: 'assistant',
-  content: [{ type: 'text', text: 'done: ' + task }],
+  content: [{ type: 'text', text: task.includes('big-emoji') ? 'a' + '😀'.repeat(20000) : 'done: ' + task }],
   usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
   stopReason: 'stop',
 };
@@ -167,6 +167,17 @@ test('labels a failed parallel task without its normal stop reason', async () =>
     ctx,
   );
   assert.match(result.content[0]?.text ?? '', /### \[task 1\] failed\n/);
+});
+
+test('truncates long parallel output without splitting characters', async () => {
+  const result = await getTool().execute(
+    '1',
+    { tasks: [{ task: 'big-emoji' }] },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.match(result.content[0]?.text ?? '', /\] completed\n\na😀+\n\n\[Output truncated/u);
 });
 
 test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {
