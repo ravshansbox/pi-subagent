@@ -589,38 +589,32 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      if (params.task) {
-        const result = await runSingleAgent(
-          ctx.cwd,
-          parent,
-          'subagent',
-          params.task,
-          params.cwd,
-          undefined,
-          signal,
-          onUpdate,
-          makeDetails('single'),
-        );
-        const isError = isFailedResult(result);
-        if (isError) {
-          const errorMsg = getResultOutput(result);
-          return {
-            content: [
-              { type: 'text', text: `Agent ${result.stopReason || 'failed'}: ${errorMsg}` },
-            ],
-            details: makeDetails('single')([result]),
-            isError: true,
-          };
-        }
+      const result = await runSingleAgent(
+        ctx.cwd,
+        parent,
+        'subagent',
+        params.task!,
+        params.cwd,
+        undefined,
+        signal,
+        onUpdate,
+        makeDetails('single'),
+      );
+      if (isFailedResult(result)) {
         return {
-          content: [{ type: 'text', text: getFinalOutput(result.messages) || '(no output)' }],
+          content: [
+            {
+              type: 'text',
+              text: `Agent ${result.stopReason || 'failed'}: ${getResultOutput(result)}`,
+            },
+          ],
           details: makeDetails('single')([result]),
+          isError: true,
         };
       }
-
       return {
-        content: [{ type: 'text', text: 'Invalid parameters.' }],
-        details: makeDetails('single')([]),
+        content: [{ type: 'text', text: getFinalOutput(result.messages) || '(no output)' }],
+        details: makeDetails('single')([result]),
       };
     },
 
