@@ -63,12 +63,12 @@ function formatToolCall(
 
   switch (toolName) {
     case 'bash': {
-      const command = (args['command'] as string) || '...';
+      const command = String(args['command'] || '...');
       const preview = command.length > 60 ? `${command.slice(0, 60)}...` : command;
       return themeFg('muted', '$ ') + themeFg('toolOutput', preview);
     }
     case 'read': {
-      const rawPath = (args['file_path'] || args['path'] || '...') as string;
+      const rawPath = String(args['file_path'] || args['path'] || '...');
       const filePath = shortenPath(rawPath);
       const lineRange = formatReadLineRange(args['offset'], args['limit']);
       let text = themeFg('accent', filePath);
@@ -78,25 +78,25 @@ function formatToolCall(
       return themeFg('muted', 'read ') + text;
     }
     case 'write': {
-      const rawPath = (args['file_path'] || args['path'] || '...') as string;
+      const rawPath = String(args['file_path'] || args['path'] || '...');
       const filePath = shortenPath(rawPath);
-      const content = (args['content'] || '') as string;
+      const content = String(args['content'] || '');
       const lines = content.split('\n').length;
       let text = themeFg('muted', 'write ') + themeFg('accent', filePath);
       if (lines > 1) text += themeFg('dim', ` (${lines} lines)`);
       return text;
     }
     case 'edit': {
-      const rawPath = (args['file_path'] || args['path'] || '...') as string;
+      const rawPath = String(args['file_path'] || args['path'] || '...');
       return themeFg('muted', 'edit ') + themeFg('accent', shortenPath(rawPath));
     }
     case 'ls': {
-      const rawPath = (args['path'] || '.') as string;
+      const rawPath = String(args['path'] || '.');
       return themeFg('muted', 'ls ') + themeFg('accent', shortenPath(rawPath));
     }
     case 'find': {
-      const pattern = (args['pattern'] || '*') as string;
-      const rawPath = (args['path'] || '.') as string;
+      const pattern = String(args['pattern'] || '*');
+      const rawPath = String(args['path'] || '.');
       return (
         themeFg('muted', 'find ') +
         themeFg('accent', pattern) +
@@ -104,8 +104,8 @@ function formatToolCall(
       );
     }
     case 'grep': {
-      const pattern = (args['pattern'] || '') as string;
-      const rawPath = (args['path'] || '.') as string;
+      const pattern = String(args['pattern'] || '');
+      const rawPath = String(args['path'] || '.');
       return (
         themeFg('muted', 'grep ') +
         themeFg('accent', `/${pattern}/`) +

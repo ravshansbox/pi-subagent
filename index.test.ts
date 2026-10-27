@@ -204,6 +204,12 @@ test('shows a chain step that stopped with an error as failed', () => {
   assert.match(text, /✗ chain 0\/1 steps/);
 });
 
+test('renders a tool call whose path is not a string', () => {
+  const toolCall = { type: 'toolCall', name: 'read', arguments: { path: 42 } };
+  const messages = [{ role: 'assistant', content: [toolCall] }];
+  assert.match(renderResult('single', { exitCode: 0, messages }), /read 42/);
+});
+
 test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {
   const controller = new AbortController();
   const run = getTool().execute('1', { task: 'ignore-term' }, controller.signal, undefined, ctx);
