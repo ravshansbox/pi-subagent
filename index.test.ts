@@ -15,6 +15,11 @@ type Tool = {
     onUpdate: undefined,
     ctx: unknown,
   ) => Promise<{ content: { type: string; text: string }[]; isError?: boolean }>;
+  renderResult: (
+    result: unknown,
+    options: { expanded: boolean },
+    theme: unknown,
+  ) => { render: (width: number) => string[] };
 };
 
 const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagent-test-'));
@@ -71,6 +76,20 @@ function getTool(): Tool {
   extension(pi);
   assert.ok(tool);
   return tool;
+}
+
+const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+
+function renderResult(mode: string, result: Record<string, unknown>): string {
+  const details = {
+    mode,
+    results: [{ label: 'step 1', task: 't', step: 1, stderr: '', usage: emptyUsage, ...result }],
+  };
+  return getTool()
+    .renderResult({ content: [], details }, { expanded: false }, plainTheme)
+    .render(200)
+    .join('\n');
 }
 
 function childArgs(): string[][] {
@@ -178,6 +197,11 @@ test('truncates long parallel output without splitting characters', async () => 
     ctx,
   );
   assert.match(result.content[0]?.text ?? '', /\] completed\n\na😀+\n\n\[Output truncated/u);
+});
+
+test('shows a chain step that stopped with an error as failed', () => {
+  const text = renderResult('chain', { exitCode: 0, stopReason: 'error', messages: [] });
+  assert.match(text, /✗ chain 0\/1 steps/);
 });
 
 test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {
