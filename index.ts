@@ -574,7 +574,7 @@ export default function (pi: ExtensionAPI) {
         const summaries = results.map((r) => {
           const output = truncateParallelOutput(getResultOutput(r));
           const status = isFailedResult(r)
-            ? `failed${r.stopReason && r.stopReason !== 'end' ? ` (${r.stopReason})` : ''}`
+            ? `failed${r.stopReason && r.stopReason !== 'stop' ? ` (${r.stopReason})` : ''}`
             : 'completed';
           return `### [${r.label}] ${status}\n\n${output}`;
         });

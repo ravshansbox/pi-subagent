@@ -46,6 +46,7 @@ if (task.includes('split-utf8')) {
 } else {
   process.stdout.write(line);
 }
+if (task.includes('exit-fail')) process.exitCode = 1;
 `,
   { mode: 0o755 },
 );
@@ -155,6 +156,17 @@ test('keeps multi-byte characters split across output chunks', async () => {
 test('reports a subagent killed by a signal as failed', async () => {
   const result = await getTool().execute('1', { task: 'crash' }, undefined, undefined, ctx);
   assert.equal(result.isError, true);
+});
+
+test('labels a failed parallel task without its normal stop reason', async () => {
+  const result = await getTool().execute(
+    '1',
+    { tasks: [{ task: 'exit-fail' }] },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.match(result.content[0]?.text ?? '', /### \[task 1\] failed\n/);
 });
 
 test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {
