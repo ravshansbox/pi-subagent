@@ -6,12 +6,13 @@ import type { AgentToolResult, ThinkingLevel } from '@earendil-works/pi-agent-co
 import type { Message } from '@earendil-works/pi-ai';
 import {
   type ExtensionAPI,
+  type ExtensionContext,
   formatReadLineRange,
   getMarkdownTheme,
   type ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import { Container, Markdown, Spacer, Text, TruncatedText } from '@earendil-works/pi-tui';
-import { Type } from 'typebox';
+import { type Static, Type } from 'typebox';
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -394,9 +395,247 @@ const SubagentParams = Type.Object({
   cwd: Type.Optional(
     Type.String({ description: 'Working directory for the subagent process (single mode)' }),
   ),
+  background: Type.Optional(
+    Type.Boolean({
+      description:
+        'Run in the background and return at once. The result arrives later as a follow-up message.',
+    }),
+  ),
 });
 
+async function runSubagent(
+  params: Static<typeof SubagentParams>,
+  signal: AbortSignal | undefined,
+  onUpdate: OnUpdateCallback | undefined,
+  ctx: ExtensionContext,
+): Promise<AgentToolResult<SubagentDetails> & { isError?: boolean }> {
+  const parent: ParentSettings = {
+    provider: ctx.model?.provider,
+    model: ctx.model?.id,
+    contextWindow: ctx.model?.contextWindow,
+    thinkingLevel: ctx.thinkingLevel,
+  };
+
+  const hasChain = (params.chain?.length ?? 0) > 0;
+  const hasTasks = (params.tasks?.length ?? 0) > 0;
+  const hasSingle = Boolean(params.task);
+  const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
+
+  const makeDetails =
+    (mode: 'single' | 'parallel' | 'chain') =>
+    (results: SingleResult[]): SubagentDetails => ({
+      mode,
+      results,
+    });
+
+  if (modeCount !== 1) {
+    return {
+      content: [{ type: 'text', text: 'Invalid parameters. Provide exactly one mode.' }],
+      details: makeDetails('single')([]),
+    };
+  }
+
+  if (params.chain && params.chain.length > 0) {
+    const results: SingleResult[] = [];
+    let previousOutput = '';
+
+    for (let i = 0; i < params.chain.length; i++) {
+      const step = params.chain[i]!;
+      const taskWithContext = step.task.replace(/\{previous\}/g, () => previousOutput);
+
+      const chainUpdate: OnUpdateCallback | undefined = onUpdate
+        ? (partial) => {
+            const currentResult = partial.details?.results[0];
+            if (currentResult) {
+              const allResults = [...results, currentResult];
+              onUpdate({
+                content: partial.content,
+                details: makeDetails('chain')(allResults),
+              });
+            }
+          }
+        : undefined;
+
+      const result = await runSingleAgent(
+        ctx.cwd,
+        parent,
+        `step ${i + 1}`,
+        taskWithContext,
+        step.cwd,
+        i + 1,
+        signal,
+        chainUpdate,
+        makeDetails('chain'),
+      );
+      results.push(result);
+
+      const isError = isFailedResult(result);
+      if (isError) {
+        const errorMsg = getResultOutput(result);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Chain stopped at step ${i + 1}: ${errorMsg}`,
+            },
+          ],
+          details: makeDetails('chain')(results),
+          isError: true,
+        };
+      }
+      previousOutput = getFinalOutput(result.messages);
+    }
+    return {
+      content: [
+        {
+          type: 'text',
+          text: getFinalOutput(results[results.length - 1]!.messages) || '(no output)',
+        },
+      ],
+      details: makeDetails('chain')(results),
+    };
+  }
+
+  if (params.tasks && params.tasks.length > 0) {
+    if (params.tasks.length > MAX_PARALLEL_TASKS)
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
+          },
+        ],
+        details: makeDetails('parallel')([]),
+      };
+
+    const allResults: SingleResult[] = Array.from({ length: params.tasks.length });
+
+    for (let i = 0; i < params.tasks.length; i++) {
+      allResults[i] = {
+        label: `task ${i + 1}`,
+        task: params.tasks[i]!.task,
+        exitCode: -1,
+        messages: [],
+        stderr: '',
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          contextTokens: 0,
+          turns: 0,
+        },
+      };
+    }
+
+    const emitParallelUpdate = () => {
+      if (onUpdate) {
+        const running = allResults.filter((r) => r.exitCode === -1).length;
+        const done = allResults.filter((r) => r.exitCode !== -1).length;
+        onUpdate({
+          content: [
+            {
+              type: 'text',
+              text: `Parallel: ${done}/${allResults.length} done, ${running} running...`,
+            },
+          ],
+          details: makeDetails('parallel')([...allResults]),
+        });
+      }
+    };
+
+    const results = await mapWithConcurrencyLimit(
+      params.tasks,
+      MAX_CONCURRENCY,
+      async (t, index) => {
+        const result = await runSingleAgent(
+          ctx.cwd,
+          parent,
+          `task ${index + 1}`,
+          t.task,
+          t.cwd,
+          undefined,
+          signal,
+          (partial) => {
+            if (partial.details?.results[0]) {
+              allResults[index] = { ...partial.details.results[0], exitCode: -1 };
+              emitParallelUpdate();
+            }
+          },
+          makeDetails('parallel'),
+        );
+        allResults[index] = result;
+        emitParallelUpdate();
+        return result;
+      },
+    );
+
+    const successCount = results.filter((r) => !isFailedResult(r)).length;
+    const summaries = results.map((r) => {
+      const output = truncateParallelOutput(getResultOutput(r));
+      const status = isFailedResult(r)
+        ? `failed${r.stopReason && r.stopReason !== 'stop' ? ` (${r.stopReason})` : ''}`
+        : 'completed';
+      return `### [${r.label}] ${status}\n\n${output}`;
+    });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join('\n\n---\n\n')}`,
+        },
+      ],
+      details: makeDetails('parallel')(results),
+    };
+  }
+
+  const result = await runSingleAgent(
+    ctx.cwd,
+    parent,
+    'subagent',
+    params.task!,
+    params.cwd,
+    undefined,
+    signal,
+    onUpdate,
+    makeDetails('single'),
+  );
+  if (isFailedResult(result)) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Agent ${result.stopReason || 'failed'}: ${getResultOutput(result)}`,
+        },
+      ],
+      details: makeDetails('single')([result]),
+      isError: true,
+    };
+  }
+  return {
+    content: [{ type: 'text', text: getFinalOutput(result.messages) || '(no output)' }],
+    details: makeDetails('single')([result]),
+  };
+}
+
 export default function (pi: ExtensionAPI) {
+  const backgroundJobs = new Map<number, AbortController>();
+  let nextJobId = 1;
+
+  const updateStatus = (ctx: ExtensionContext) => {
+    if (!ctx.hasUI) return;
+    const count = backgroundJobs.size;
+    ctx.ui.setStatus(
+      'subagent',
+      count > 0 ? `⏳ ${count} subagent${count > 1 ? 's' : ''}` : undefined,
+    );
+  };
+
+  pi.on('session_shutdown', () => {
+    for (const controller of backgroundJobs.values()) controller.abort();
+    backgroundJobs.clear();
+  });
+
   pi.registerTool({
     name: 'subagent',
     label: 'Subagent',
@@ -408,212 +647,37 @@ export default function (pi: ExtensionAPI) {
     parameters: SubagentParams,
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const parent: ParentSettings = {
-        provider: ctx.model?.provider,
-        model: ctx.model?.id,
-        contextWindow: ctx.model?.contextWindow,
-        thinkingLevel: ctx.thinkingLevel,
-      };
+      if (!params.background) return runSubagent(params, signal, onUpdate, ctx);
 
-      const hasChain = (params.chain?.length ?? 0) > 0;
-      const hasTasks = (params.tasks?.length ?? 0) > 0;
-      const hasSingle = Boolean(params.task);
-      const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
-
-      const makeDetails =
-        (mode: 'single' | 'parallel' | 'chain') =>
-        (results: SingleResult[]): SubagentDetails => ({
-          mode,
-          results,
-        });
-
-      if (modeCount !== 1) {
-        return {
-          content: [{ type: 'text', text: 'Invalid parameters. Provide exactly one mode.' }],
-          details: makeDetails('single')([]),
-        };
-      }
-
-      if (params.chain && params.chain.length > 0) {
-        const results: SingleResult[] = [];
-        let previousOutput = '';
-
-        for (let i = 0; i < params.chain.length; i++) {
-          const step = params.chain[i]!;
-          const taskWithContext = step.task.replace(/\{previous\}/g, () => previousOutput);
-
-          const chainUpdate: OnUpdateCallback | undefined = onUpdate
-            ? (partial) => {
-                const currentResult = partial.details?.results[0];
-                if (currentResult) {
-                  const allResults = [...results, currentResult];
-                  onUpdate({
-                    content: partial.content,
-                    details: makeDetails('chain')(allResults),
-                  });
-                }
-              }
-            : undefined;
-
-          const result = await runSingleAgent(
-            ctx.cwd,
-            parent,
-            `step ${i + 1}`,
-            taskWithContext,
-            step.cwd,
-            i + 1,
-            signal,
-            chainUpdate,
-            makeDetails('chain'),
+      const jobId = nextJobId++;
+      const controller = new AbortController();
+      backgroundJobs.set(jobId, controller);
+      updateStatus(ctx);
+      runSubagent(params, controller.signal, undefined, ctx).then(
+        (result) => {
+          backgroundJobs.delete(jobId);
+          updateStatus(ctx);
+          const output = result.content[0]?.type === 'text' ? result.content[0].text : '';
+          pi.sendMessage(
+            {
+              customType: 'subagent-result',
+              content: `Background subagent job ${jobId} ${result.isError ? 'failed' : 'finished'}:\n\n${output}`,
+              display: true,
+            },
+            { triggerTurn: true, deliverAs: 'followUp' },
           );
-          results.push(result);
-
-          const isError = isFailedResult(result);
-          if (isError) {
-            const errorMsg = getResultOutput(result);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: `Chain stopped at step ${i + 1}: ${errorMsg}`,
-                },
-              ],
-              details: makeDetails('chain')(results),
-              isError: true,
-            };
-          }
-          previousOutput = getFinalOutput(result.messages);
-        }
-        return {
-          content: [
-            {
-              type: 'text',
-              text: getFinalOutput(results[results.length - 1]!.messages) || '(no output)',
-            },
-          ],
-          details: makeDetails('chain')(results),
-        };
-      }
-
-      if (params.tasks && params.tasks.length > 0) {
-        if (params.tasks.length > MAX_PARALLEL_TASKS)
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
-              },
-            ],
-            details: makeDetails('parallel')([]),
-          };
-
-        const allResults: SingleResult[] = Array.from({ length: params.tasks.length });
-
-        for (let i = 0; i < params.tasks.length; i++) {
-          allResults[i] = {
-            label: `task ${i + 1}`,
-            task: params.tasks[i]!.task,
-            exitCode: -1,
-            messages: [],
-            stderr: '',
-            usage: {
-              input: 0,
-              output: 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-              contextTokens: 0,
-              turns: 0,
-            },
-          };
-        }
-
-        const emitParallelUpdate = () => {
-          if (onUpdate) {
-            const running = allResults.filter((r) => r.exitCode === -1).length;
-            const done = allResults.filter((r) => r.exitCode !== -1).length;
-            onUpdate({
-              content: [
-                {
-                  type: 'text',
-                  text: `Parallel: ${done}/${allResults.length} done, ${running} running...`,
-                },
-              ],
-              details: makeDetails('parallel')([...allResults]),
-            });
-          }
-        };
-
-        const results = await mapWithConcurrencyLimit(
-          params.tasks,
-          MAX_CONCURRENCY,
-          async (t, index) => {
-            const result = await runSingleAgent(
-              ctx.cwd,
-              parent,
-              `task ${index + 1}`,
-              t.task,
-              t.cwd,
-              undefined,
-              signal,
-              (partial) => {
-                if (partial.details?.results[0]) {
-                  allResults[index] = { ...partial.details.results[0], exitCode: -1 };
-                  emitParallelUpdate();
-                }
-              },
-              makeDetails('parallel'),
-            );
-            allResults[index] = result;
-            emitParallelUpdate();
-            return result;
-          },
-        );
-
-        const successCount = results.filter((r) => !isFailedResult(r)).length;
-        const summaries = results.map((r) => {
-          const output = truncateParallelOutput(getResultOutput(r));
-          const status = isFailedResult(r)
-            ? `failed${r.stopReason && r.stopReason !== 'stop' ? ` (${r.stopReason})` : ''}`
-            : 'completed';
-          return `### [${r.label}] ${status}\n\n${output}`;
-        });
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join('\n\n---\n\n')}`,
-            },
-          ],
-          details: makeDetails('parallel')(results),
-        };
-      }
-
-      const result = await runSingleAgent(
-        ctx.cwd,
-        parent,
-        'subagent',
-        params.task!,
-        params.cwd,
-        undefined,
-        signal,
-        onUpdate,
-        makeDetails('single'),
+        },
+        () => backgroundJobs.delete(jobId),
       );
-      if (isFailedResult(result)) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Agent ${result.stopReason || 'failed'}: ${getResultOutput(result)}`,
-            },
-          ],
-          details: makeDetails('single')([result]),
-          isError: true,
-        };
-      }
+
       return {
-        content: [{ type: 'text', text: getFinalOutput(result.messages) || '(no output)' }],
-        details: makeDetails('single')([result]),
+        content: [
+          {
+            type: 'text',
+            text: `Started background subagent job ${jobId}. Its result will arrive as a follow-up message.`,
+          },
+        ],
+        details: { mode: 'single', results: [] },
       };
     },
 

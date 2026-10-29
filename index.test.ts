@@ -28,6 +28,7 @@ type Tool = {
 
 const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagent-test-'));
 const argsFile = path.join(binDir, 'args.jsonl');
+const pidFile = path.join(binDir, 'pid');
 fs.writeFileSync(
   path.join(binDir, 'pi'),
   `#!/usr/bin/env node
@@ -38,6 +39,10 @@ if (args[args.length - 1].includes('ignore-term')) {
   setInterval(() => {}, 1000);
 }
 fs.appendFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args) + '\\n');
+if (args[args.length - 1].includes('hang')) {
+  fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+  setInterval(() => {}, 1000);
+}
 const task = args[args.length - 1];
 if (task.includes('crash')) process.kill(process.pid, 'SIGKILL');
 const message = {
@@ -70,16 +75,37 @@ const ctx = {
   isProjectTrusted: () => true,
 };
 
-function getTool(): Tool {
+type SentMessage = {
+  message: { customType: string; content: string; display: boolean };
+  options: unknown;
+};
+
+function loadExtension() {
   let tool: Tool | undefined;
+  const sent: SentMessage[] = [];
+  const handlers: Record<string, (() => unknown)[]> = {};
   const pi = {
     registerTool: (t: Tool) => {
       tool = t;
     },
+    sendMessage: (message: SentMessage['message'], options: unknown) => {
+      sent.push({ message, options });
+    },
+    on: (event: string, handler: () => unknown) => {
+      (handlers[event] ??= []).push(handler);
+    },
   } as unknown as ExtensionAPI;
   extension(pi);
   assert.ok(tool);
-  return tool;
+  return { tool, sent, handlers };
+}
+
+function getTool(): Tool {
+  return loadExtension().tool;
+}
+
+async function waitFor(check: () => boolean) {
+  while (!check()) await new Promise((r) => setTimeout(r, 20));
 }
 
 const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
@@ -133,6 +159,7 @@ function assertInherits(args: string[]) {
 
 beforeEach(() => {
   fs.rmSync(argsFile, { force: true });
+  fs.rmSync(pidFile, { force: true });
 });
 
 test('passes the parent provider, model and thinking level to a single subagent', async () => {
@@ -334,5 +361,87 @@ test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, as
 
 test('does not offer agent selection', () => {
   const properties = Object.keys(getTool().parameters.properties);
-  assert.deepEqual(properties.sort(), ['chain', 'cwd', 'task', 'tasks']);
+  assert.deepEqual(properties.sort(), ['background', 'chain', 'cwd', 'task', 'tasks']);
+});
+
+test('returns at once from a background subagent and delivers its result as a follow-up', async () => {
+  const { tool, sent } = loadExtension();
+  const result = await tool.execute(
+    '1',
+    { task: 'find bugs', background: true },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.match(result.content[0]?.text ?? '', /^Started background subagent job 1\./);
+  assert.equal(sent.length, 0);
+  await waitFor(() => sent.length === 1);
+  assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: 'followUp' });
+  assert.equal(sent[0]!.message.customType, 'subagent-result');
+  assert.equal(sent[0]!.message.display, true);
+  assert.equal(
+    sent[0]!.message.content,
+    'Background subagent job 1 finished:\n\ndone: Task: find bugs',
+  );
+});
+
+test('delivers a failed background subagent as failed', async () => {
+  const { tool, sent } = loadExtension();
+  await tool.execute('1', { task: 'crash', background: true }, undefined, undefined, ctx);
+  await waitFor(() => sent.length === 1);
+  assert.match(sent[0]!.message.content, /^Background subagent job 1 failed:\n\nAgent failed/);
+});
+
+test('runs parallel tasks in the background', async () => {
+  const { tool, sent } = loadExtension();
+  await tool.execute(
+    '1',
+    { tasks: [{ task: 'one' }, { task: 'two' }], background: true },
+    undefined,
+    undefined,
+    ctx,
+  );
+  await waitFor(() => sent.length === 1);
+  assert.match(sent[0]!.message.content, /finished:\n\nParallel: 2\/2 succeeded/);
+});
+
+test('keeps a background subagent running when the tool call is aborted', async () => {
+  const { tool, sent } = loadExtension();
+  const controller = new AbortController();
+  await tool.execute('1', { task: 'one', background: true }, controller.signal, undefined, ctx);
+  controller.abort();
+  await waitFor(() => sent.length === 1);
+  assert.match(sent[0]!.message.content, /finished:\n\ndone: Task: one$/);
+});
+
+test('shows running background subagents in the status line', async () => {
+  const { tool, sent } = loadExtension();
+  const statuses: (string | undefined)[] = [];
+  const uiCtx = {
+    ...ctx,
+    hasUI: true,
+    ui: { setStatus: (_key: string, text: string | undefined) => statuses.push(text) },
+  };
+  await tool.execute('1', { task: 'one', background: true }, undefined, undefined, uiCtx);
+  await tool.execute('2', { task: 'two', background: true }, undefined, undefined, uiCtx);
+  await waitFor(() => sent.length === 2);
+  assert.deepEqual(statuses, ['⏳ 1 subagent', '⏳ 2 subagents', '⏳ 1 subagent', undefined]);
+});
+
+test('stops background subagents when the session shuts down', async () => {
+  const { tool, sent, handlers } = loadExtension();
+  await tool.execute('1', { task: 'hang', background: true }, undefined, undefined, ctx);
+  await waitFor(() => fs.existsSync(pidFile));
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+  for (const handler of handlers['session_shutdown'] ?? []) await handler();
+  await waitFor(() => {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(sent.length, 0);
 });
