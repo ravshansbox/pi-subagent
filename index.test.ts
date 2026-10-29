@@ -518,3 +518,17 @@ test('does not offer the subagent tool at the max depth', () => {
     false,
   );
 });
+
+test('does not run subagents in the background inside a subagent', async () => {
+  const { tool, sent } = withEnv({ PI_SUBAGENT_DEPTH: '1' }, () => loadExtension());
+  assert.equal('background' in tool.parameters.properties, false);
+  const result = await tool.execute(
+    '1',
+    { task: 'one', background: true },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.equal(result.content[0]?.text, 'done: Task: one');
+  assert.equal(sent.length, 0);
+});

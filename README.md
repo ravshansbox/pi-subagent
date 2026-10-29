@@ -35,6 +35,8 @@ Subagents can start their own subagents, up to a maximum depth. The default is 2
 
 The main session reads this setting and passes it down to all nested subagents.
 
+Nested subagents cannot use `background`. A subagent's process exits when its turn ends, which would stop the job, and a late follow-up would replace its final reply.
+
 ## Development
 
 ```bash

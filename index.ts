@@ -665,11 +665,12 @@ export default function (pi: ExtensionAPI) {
       'Modes: single (task), parallel (tasks array), chain (sequential with {previous} placeholder).',
       'Subagents use the current provider, model and thinking level.',
     ].join(' '),
-    parameters: SubagentParams,
+    parameters: depth > 0 ? Type.Omit(SubagentParams, ['background']) : SubagentParams,
 
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+    async execute(_toolCallId, params: Static<typeof SubagentParams>, signal, onUpdate, ctx) {
       const nesting = getNesting();
-      if (!params.background) return runSubagent(params, signal, onUpdate, ctx, nesting);
+      if (depth > 0 || !params.background)
+        return runSubagent(params, signal, onUpdate, ctx, nesting);
 
       const jobId = nextJobId++;
       const controller = new AbortController();
