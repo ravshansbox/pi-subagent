@@ -17,6 +17,7 @@ import { type Static, Type } from 'typebox';
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
+const DEFAULT_MAX_DEPTH = 2;
 
 function formatTokens(count: number): string {
   if (count < 1000) return count.toString();
@@ -242,6 +243,8 @@ interface ParentSettings {
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
   contextWindow?: number | undefined;
+  depth: number;
+  maxDepth: number;
 }
 
 async function runSingleAgent(
@@ -297,6 +300,11 @@ async function runSingleAgent(
     const invocation = getPiInvocation(args);
     const proc = spawn(invocation.command, invocation.args, {
       cwd: cwd ?? defaultCwd,
+      env: {
+        ...process.env,
+        PI_SUBAGENT_DEPTH: String(parent.depth + 1),
+        PI_SUBAGENT_MAX_DEPTH: String(parent.maxDepth),
+      },
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -408,8 +416,10 @@ async function runSubagent(
   signal: AbortSignal | undefined,
   onUpdate: OnUpdateCallback | undefined,
   ctx: ExtensionContext,
+  nesting: { depth: number; maxDepth: number },
 ): Promise<AgentToolResult<SubagentDetails> & { isError?: boolean }> {
   const parent: ParentSettings = {
+    ...nesting,
     provider: ctx.model?.provider,
     model: ctx.model?.id,
     contextWindow: ctx.model?.contextWindow,
@@ -619,6 +629,17 @@ async function runSubagent(
 }
 
 export default function (pi: ExtensionAPI) {
+  const depth = Number(process.env['PI_SUBAGENT_DEPTH']) || 0;
+  const inheritedMaxDepth = Number(process.env['PI_SUBAGENT_MAX_DEPTH']) || undefined;
+  if (depth >= (inheritedMaxDepth ?? DEFAULT_MAX_DEPTH)) return;
+
+  const getNesting = () => {
+    if (inheritedMaxDepth !== undefined) return { depth, maxDepth: inheritedMaxDepth };
+    const settings = pi.getSettings() as { subagent?: { maxDepth?: unknown } };
+    const maxDepth = settings.subagent?.maxDepth;
+    return { depth, maxDepth: typeof maxDepth === 'number' ? maxDepth : DEFAULT_MAX_DEPTH };
+  };
+
   const backgroundJobs = new Map<number, AbortController>();
   let nextJobId = 1;
 
@@ -647,13 +668,14 @@ export default function (pi: ExtensionAPI) {
     parameters: SubagentParams,
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      if (!params.background) return runSubagent(params, signal, onUpdate, ctx);
+      const nesting = getNesting();
+      if (!params.background) return runSubagent(params, signal, onUpdate, ctx, nesting);
 
       const jobId = nextJobId++;
       const controller = new AbortController();
       backgroundJobs.set(jobId, controller);
       updateStatus(ctx);
-      runSubagent(params, controller.signal, undefined, ctx).then(
+      runSubagent(params, controller.signal, undefined, ctx, nesting).then(
         (result) => {
           backgroundJobs.delete(jobId);
           updateStatus(ctx);

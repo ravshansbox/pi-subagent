@@ -29,6 +29,7 @@ type Tool = {
 const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagent-test-'));
 const argsFile = path.join(binDir, 'args.jsonl');
 const pidFile = path.join(binDir, 'pid');
+const envFile = path.join(binDir, 'env.jsonl');
 fs.writeFileSync(
   path.join(binDir, 'pi'),
   `#!/usr/bin/env node
@@ -39,6 +40,13 @@ if (args[args.length - 1].includes('ignore-term')) {
   setInterval(() => {}, 1000);
 }
 fs.appendFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args) + '\\n');
+fs.appendFileSync(
+  ${JSON.stringify(envFile)},
+  JSON.stringify({
+    depth: process.env.PI_SUBAGENT_DEPTH,
+    maxDepth: process.env.PI_SUBAGENT_MAX_DEPTH,
+  }) + '\\n',
+);
 if (args[args.length - 1].includes('hang')) {
   fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
   setInterval(() => {}, 1000);
@@ -80,7 +88,7 @@ type SentMessage = {
   options: unknown;
 };
 
-function loadExtension() {
+function loadExtension(settings: Record<string, unknown> = {}) {
   let tool: Tool | undefined;
   const sent: SentMessage[] = [];
   const handlers: Record<string, (() => unknown)[]> = {};
@@ -94,6 +102,7 @@ function loadExtension() {
     on: (event: string, handler: () => unknown) => {
       (handlers[event] ??= []).push(handler);
     },
+    getSettings: () => settings,
   } as unknown as ExtensionAPI;
   extension(pi);
   assert.ok(tool);
@@ -102,6 +111,39 @@ function loadExtension() {
 
 function getTool(): Tool {
   return loadExtension().tool;
+}
+
+function registersTool(): boolean {
+  let registered = false;
+  const pi = {
+    registerTool: () => {
+      registered = true;
+    },
+    on: () => {},
+  } as unknown as ExtensionAPI;
+  extension(pi);
+  return registered;
+}
+
+function withEnv<T>(vars: Record<string, string>, fn: () => T): T {
+  const previous = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, vars);
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+function childEnvs(): { depth?: string; maxDepth?: string }[] {
+  return fs
+    .readFileSync(envFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
 }
 
 async function waitFor(check: () => boolean) {
@@ -160,6 +202,7 @@ function assertInherits(args: string[]) {
 beforeEach(() => {
   fs.rmSync(argsFile, { force: true });
   fs.rmSync(pidFile, { force: true });
+  fs.rmSync(envFile, { force: true });
 });
 
 test('passes the parent provider, model and thinking level to a single subagent', async () => {
@@ -444,4 +487,34 @@ test('stops background subagents when the session shuts down', async () => {
   });
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(sent.length, 0);
+});
+
+test('passes depth 1 and the default max depth of 2 to a subagent', async () => {
+  await loadExtension().tool.execute('1', { task: 'one' }, undefined, undefined, ctx);
+  assert.deepEqual(childEnvs(), [{ depth: '1', maxDepth: '2' }]);
+});
+
+test('reads the max depth from subagent.maxDepth in settings', async () => {
+  const { tool } = loadExtension({ subagent: { maxDepth: 3 } });
+  await tool.execute('1', { task: 'one' }, undefined, undefined, ctx);
+  assert.deepEqual(childEnvs(), [{ depth: '1', maxDepth: '3' }]);
+});
+
+test('passes the inherited max depth on to nested subagents', async () => {
+  const { tool } = withEnv({ PI_SUBAGENT_DEPTH: '1', PI_SUBAGENT_MAX_DEPTH: '3' }, () =>
+    loadExtension({ subagent: { maxDepth: 5 } }),
+  );
+  await tool.execute('1', { task: 'one' }, undefined, undefined, ctx);
+  assert.deepEqual(childEnvs(), [{ depth: '2', maxDepth: '3' }]);
+});
+
+test('does not offer the subagent tool at the max depth', () => {
+  assert.equal(
+    withEnv({ PI_SUBAGENT_DEPTH: '1', PI_SUBAGENT_MAX_DEPTH: '2' }, registersTool),
+    true,
+  );
+  assert.equal(
+    withEnv({ PI_SUBAGENT_DEPTH: '2', PI_SUBAGENT_MAX_DEPTH: '2' }, registersTool),
+    false,
+  );
 });
