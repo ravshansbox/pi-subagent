@@ -350,7 +350,8 @@ async function runSingleAgent(
       resolve(code ?? 1);
     });
 
-    proc.on('error', () => {
+    proc.on('error', (error) => {
+      currentResult.errorMessage = error.message;
       resolve(1);
     });
 

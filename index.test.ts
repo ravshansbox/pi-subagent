@@ -199,6 +199,18 @@ test('reports a subagent killed by a signal as failed', async () => {
   assert.equal(result.isError, true);
 });
 
+test('reports why a subagent could not start', async () => {
+  const result = await getTool().execute(
+    '1',
+    { task: 'one', cwd: path.join(binDir, 'missing-dir') },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? '', /ENOENT/);
+});
+
 test('labels a failed parallel task without its normal stop reason', async () => {
   const result = await getTool().execute(
     '1',
