@@ -648,7 +648,7 @@ export default function (pi: ExtensionAPI) {
     const count = backgroundJobs.size;
     ctx.ui.setStatus(
       'subagent',
-      count > 0 ? `⏳ ${count} subagent${count > 1 ? 's' : ''}` : undefined,
+      count > 0 ? `${count} subagent${count > 1 ? 's' : ''}` : undefined,
     );
   };
 

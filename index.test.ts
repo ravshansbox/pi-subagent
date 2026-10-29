@@ -468,7 +468,7 @@ test('shows running background subagents in the status line', async () => {
   await tool.execute('1', { task: 'one', background: true }, undefined, undefined, uiCtx);
   await tool.execute('2', { task: 'two', background: true }, undefined, undefined, uiCtx);
   await waitFor(() => sent.length === 2);
-  assert.deepEqual(statuses, ['⏳ 1 subagent', '⏳ 2 subagents', '⏳ 1 subagent', undefined]);
+  assert.deepEqual(statuses, ['1 subagent', '2 subagents', '1 subagent', undefined]);
 });
 
 test('stops background subagents when the session shuts down', async () => {
