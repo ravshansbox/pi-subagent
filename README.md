@@ -23,7 +23,7 @@ Each subagent runs in a separate `pi` process with its own context window. It us
 
 The collapsed result shows one line per subagent, with its last tool call and usage, or the first line of its error. Press Ctrl+O to expand it.
 
-Add `background: true` to any mode to return at once. The result arrives later as a follow-up message, which starts a new turn once the agent is idle. The status line shows how many background subagents are running. Esc does not stop them, but they are stopped when the session shuts down.
+Add `background: true` to any mode to return at once. The result arrives later as a follow-up message, which starts a new turn once the agent is idle. Esc does not stop them, but they are stopped when the session shuts down.
 
 Subagents can start their own subagents, up to a maximum depth. The default is 2, which allows main → subagent → subagent. Subagents at the maximum depth do not get the `subagent` tool. To change it, set `subagent.maxDepth` in `settings.json`:
 

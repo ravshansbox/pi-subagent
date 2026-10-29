@@ -643,15 +643,6 @@ export default function (pi: ExtensionAPI) {
   const backgroundJobs = new Map<number, AbortController>();
   let nextJobId = 1;
 
-  const updateStatus = (ctx: ExtensionContext) => {
-    if (!ctx.hasUI) return;
-    const count = backgroundJobs.size;
-    ctx.ui.setStatus(
-      'subagent',
-      count > 0 ? `⏳ ${count} subagent${count > 1 ? 's' : ''}` : undefined,
-    );
-  };
-
   pi.on('session_shutdown', () => {
     for (const controller of backgroundJobs.values()) controller.abort();
     backgroundJobs.clear();
@@ -674,11 +665,9 @@ export default function (pi: ExtensionAPI) {
       const jobId = nextJobId++;
       const controller = new AbortController();
       backgroundJobs.set(jobId, controller);
-      updateStatus(ctx);
       runSubagent(params, controller.signal, undefined, ctx, nesting).then(
         (result) => {
           backgroundJobs.delete(jobId);
-          updateStatus(ctx);
           const output = result.content[0]?.type === 'text' ? result.content[0].text : '';
           pi.sendMessage(
             {
