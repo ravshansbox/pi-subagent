@@ -288,7 +288,7 @@ async function runSingleAgent(
     if (onUpdate) {
       onUpdate({
         content: [{ type: 'text', text: getFinalOutput(currentResult.messages) || '(running...)' }],
-        details: makeDetails([currentResult]),
+        details: makeDetails([{ ...currentResult, exitCode: -1 }]),
       });
     }
   };
@@ -788,8 +788,8 @@ export default function (pi: ExtensionAPI) {
 
       if (details.mode === 'single' && details.results.length === 1) {
         const r = details.results[0]!;
-        const isError = isFailedResult(r);
-        const icon = isError ? theme.fg('error', '✗') : theme.fg('success', '✓');
+        const isError = r.exitCode !== -1 && isFailedResult(r);
+        const icon = resultIcon(r);
         const displayItems = getDisplayItems(r.messages);
         const finalOutput = getFinalOutput(r.messages);
 
@@ -853,8 +853,9 @@ export default function (pi: ExtensionAPI) {
 
       if (details.mode === 'chain') {
         const successCount = details.results.filter((r) => !isFailedResult(r)).length;
-        const icon =
-          successCount === details.results.length
+        const icon = details.results.some((r) => r.exitCode === -1)
+          ? theme.fg('warning', '⏳')
+          : successCount === details.results.length
             ? theme.fg('success', '✓')
             : theme.fg('error', '✗');
 
@@ -872,7 +873,7 @@ export default function (pi: ExtensionAPI) {
           );
 
           for (const r of details.results) {
-            const rIcon = isFailedResult(r) ? theme.fg('error', '✗') : theme.fg('success', '✓');
+            const rIcon = resultIcon(r);
             const displayItems = getDisplayItems(r.messages);
             const finalOutput = getFinalOutput(r.messages);
 

@@ -394,6 +394,29 @@ test('renders the parent context window for a finished subagent', async () => {
   assert.deepEqual(lines, ['✓ subagent · 1 turn ↑1 ↓1 0%/200k opus-5-5']);
 });
 
+async function renderFirstUpdate(params: Record<string, unknown>, expanded: boolean) {
+  const tool = getTool();
+  const updates: unknown[] = [];
+  await tool.execute('1', params, undefined, (partial) => updates.push(partial), ctx);
+  return tool
+    .renderResult(updates[0], { expanded }, plainTheme)
+    .render(200)
+    .map((line) => line.trimEnd());
+}
+
+test('shows a running single subagent as running, not succeeded', async () => {
+  const collapsed = await renderFirstUpdate({ task: 'one' }, false);
+  assert.match(collapsed[0]!, /^⏳ subagent/);
+  const expanded = await renderFirstUpdate({ task: 'one' }, true);
+  assert.match(expanded[0]!, /^⏳ subagent/);
+});
+
+test('shows a running chain step as running, not succeeded', async () => {
+  const lines = await renderFirstUpdate({ chain: [{ task: 'one' }, { task: 'two' }] }, false);
+  assert.match(lines[0]!, /^⏳ chain/);
+  assert.match(lines[1]!, /^ {2}⏳ step 1/);
+});
+
 test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {
   const controller = new AbortController();
   const run = getTool().execute('1', { task: 'ignore-term' }, controller.signal, undefined, ctx);
