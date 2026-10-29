@@ -457,6 +457,20 @@ test('keeps a background subagent running when the tool call is aborted', async 
   assert.match(sent[0]!.message.content, /finished:\n\ndone: Task: one$/);
 });
 
+test('shows running background subagents in the status line', async () => {
+  const { tool, sent } = loadExtension();
+  const statuses: (string | undefined)[] = [];
+  const uiCtx = {
+    ...ctx,
+    hasUI: true,
+    ui: { setStatus: (_key: string, text: string | undefined) => statuses.push(text) },
+  };
+  await tool.execute('1', { task: 'one', background: true }, undefined, undefined, uiCtx);
+  await tool.execute('2', { task: 'two', background: true }, undefined, undefined, uiCtx);
+  await waitFor(() => sent.length === 2);
+  assert.deepEqual(statuses, ['⏳ 1 subagent', '⏳ 2 subagents', '⏳ 1 subagent', undefined]);
+});
+
 test('stops background subagents when the session shuts down', async () => {
   const { tool, sent, handlers } = loadExtension();
   await tool.execute('1', { task: 'hang', background: true }, undefined, undefined, ctx);
