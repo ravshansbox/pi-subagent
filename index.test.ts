@@ -153,7 +153,11 @@ async function waitFor(check: () => boolean) {
 const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 };
 
-function renderResults(mode: string, results: Record<string, unknown>[]): string[] {
+function renderResults(
+  mode: string,
+  results: Record<string, unknown>[],
+  expanded = false,
+): string[] {
   const details = {
     mode,
     results: results.map((result) => ({
@@ -166,13 +170,13 @@ function renderResults(mode: string, results: Record<string, unknown>[]): string
     })),
   };
   return getTool()
-    .renderResult({ content: [], details }, { expanded: false }, plainTheme)
+    .renderResult({ content: [], details }, { expanded }, plainTheme)
     .render(200)
     .map((line) => line.trimEnd());
 }
 
-function renderResult(mode: string, result: Record<string, unknown>): string {
-  return renderResults(mode, [result]).join('\n');
+function renderResult(mode: string, result: Record<string, unknown>, expanded = false): string {
+  return renderResults(mode, [result], expanded).join('\n');
 }
 
 const usedUsage = { ...emptyUsage, input: 1200, output: 300, turns: 2 };
@@ -317,20 +321,20 @@ test('reports a parallel task as running until its process exits', async () => {
 
 test('shows a chain step that stopped with an error as failed', () => {
   const text = renderResult('chain', { exitCode: 0, stopReason: 'error', messages: [] });
-  assert.match(text, /✗ chain 0\/1 steps/);
+  assert.match(text, /failed chain 0\/1 steps/);
 });
 
 test('renders a tool call whose path is not a string', () => {
   const toolCall = { type: 'toolCall', name: 'read', arguments: { path: 42 } };
   const messages = [{ role: 'assistant', content: [toolCall] }];
-  assert.match(renderResult('single', { exitCode: 0, messages }), /read 42/);
+  assert.match(renderResult('single', { exitCode: 0, messages }, true), /read 42/);
 });
 
-test('collapses a single subagent to one line with its last tool call and usage', () => {
+test('collapses a single subagent to one line with its status and usage', () => {
   const lines = renderResults('single', [
     { label: 'subagent', exitCode: 0, usage: usedUsage, messages: messagesWith('a.ts', 'b.ts') },
   ]);
-  assert.deepEqual(lines, ['✓ subagent → read b.ts · 2 turns ↑1.2k ↓300']);
+  assert.deepEqual(lines, ['done subagent · 2 turns ↑1.2k ↓300']);
 });
 
 test('collapses parallel tasks to a header and one line per task', () => {
@@ -339,10 +343,18 @@ test('collapses parallel tasks to a header and one line per task', () => {
     { label: 'task 2', exitCode: -1, usage: emptyUsage, messages: [] },
   ]);
   assert.deepEqual(lines, [
-    '⏳ parallel 1/2 done, 1 running',
-    '  ✓ task 1 → read a.ts · 2 turns ↑1.2k ↓300',
-    '  ⏳ task 2',
+    'running parallel 1/2 done, 1 running',
+    '  done task 1 · 2 turns ↑1.2k ↓300',
+    '  running task 2',
   ]);
+});
+
+test('shows finished parallel tasks with a failure as failed', () => {
+  const lines = renderResults('parallel', [
+    { label: 'task 1', exitCode: 0, messages: [] },
+    { label: 'task 2', exitCode: 1, messages: [] },
+  ]);
+  assert.deepEqual(lines, ['failed parallel 1/2 tasks', '  done task 1', '  failed task 2']);
 });
 
 test('collapses chain steps to a header with totals and one line per step', () => {
@@ -351,9 +363,9 @@ test('collapses chain steps to a header with totals and one line per step', () =
     { label: 'step 2', exitCode: 0, usage: usedUsage, messages: messagesWith('b.ts') },
   ]);
   assert.deepEqual(lines, [
-    '✓ chain 2/2 steps · Total: 4 turns ↑2.4k ↓600',
-    '  ✓ step 1 → read a.ts · 2 turns ↑1.2k ↓300',
-    '  ✓ step 2 → read b.ts · 2 turns ↑1.2k ↓300',
+    'done chain 2/2 steps · Total: 4 turns ↑2.4k ↓600',
+    '  done step 1 · 2 turns ↑1.2k ↓300',
+    '  done step 2 · 2 turns ↑1.2k ↓300',
   ]);
 });
 
@@ -367,7 +379,7 @@ test('shows the first line of the error on a failed collapsed subagent', () => {
       messages: messagesWith('a.ts'),
     },
   ]);
-  assert.deepEqual(lines, ['✗ subagent [error] boom']);
+  assert.deepEqual(lines, ['failed subagent [error] boom']);
 });
 
 test('shows context percentage and short model name without cost', () => {
@@ -381,7 +393,7 @@ test('shows context percentage and short model name without cost', () => {
       messages: messagesWith('a.ts'),
     },
   ]);
-  assert.deepEqual(lines, ['✓ subagent → read a.ts · 2 turns ↑1.2k ↓300 12%/200k opus-5-5']);
+  assert.deepEqual(lines, ['done subagent · 2 turns ↑1.2k ↓300 12%/200k opus-5-5']);
 });
 
 test('renders the parent context window for a finished subagent', async () => {
@@ -391,7 +403,7 @@ test('renders the parent context window for a finished subagent', async () => {
     .renderResult(result, { expanded: false }, plainTheme)
     .render(200)
     .map((line) => line.trimEnd());
-  assert.deepEqual(lines, ['✓ subagent · 1 turn ↑1 ↓1 0%/200k opus-5-5']);
+  assert.deepEqual(lines, ['done subagent · 1 turn ↑1 ↓1 0%/200k opus-5-5']);
 });
 
 async function renderFirstUpdate(params: Record<string, unknown>, expanded: boolean) {
@@ -406,15 +418,15 @@ async function renderFirstUpdate(params: Record<string, unknown>, expanded: bool
 
 test('shows a running single subagent as running, not succeeded', async () => {
   const collapsed = await renderFirstUpdate({ task: 'one' }, false);
-  assert.match(collapsed[0]!, /^⏳ subagent/);
+  assert.match(collapsed[0]!, /^running subagent/);
   const expanded = await renderFirstUpdate({ task: 'one' }, true);
-  assert.match(expanded[0]!, /^⏳ subagent/);
+  assert.match(expanded[0]!, /^running subagent/);
 });
 
 test('shows a running chain step as running, not succeeded', async () => {
   const lines = await renderFirstUpdate({ chain: [{ task: 'one' }, { task: 'two' }] }, false);
-  assert.match(lines[0]!, /^⏳ chain/);
-  assert.match(lines[1]!, /^ {2}⏳ step 1/);
+  assert.match(lines[0]!, /^running chain/);
+  assert.match(lines[1]!, /^ {2}running step 1/);
 });
 
 test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, async () => {

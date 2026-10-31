@@ -750,29 +750,20 @@ export default function (pi: ExtensionAPI) {
 
       const mdTheme = getMarkdownTheme();
 
-      const resultIcon = (r: SingleResult) =>
-        r.exitCode === -1
-          ? theme.fg('warning', '⏳')
-          : isFailedResult(r)
-            ? theme.fg('error', '✗')
-            : theme.fg('success', '✓');
+      const resultStatus = (r: SingleResult) =>
+        r.exitCode === -1 ? 'running' : isFailedResult(r) ? 'failed' : 'done';
 
       const withUsage = (text: string, usageStr: string) =>
         usageStr ? text + theme.fg('dim', ` · ${usageStr}`) : text;
 
       const collapsedLine = (r: SingleResult, label: string) => {
-        let text = `${resultIcon(r)} ${label}`;
+        let text = `${resultStatus(r)} ${label}`;
         if (isFailedResult(r) && r.exitCode !== -1) {
           if (r.stopReason) text += ` ${theme.fg('error', `[${r.stopReason}]`)}`;
           const error = (r.errorMessage || r.stderr).trim().split('\n')[0];
           if (error) text += ` ${theme.fg('error', error)}`;
           return text;
         }
-        const lastToolCall = getDisplayItems(r.messages)
-          .filter((item) => item.type === 'toolCall')
-          .at(-1);
-        if (lastToolCall)
-          text += ` ${theme.fg('muted', '→ ')}${formatToolCall(lastToolCall.name, lastToolCall.args, theme.fg.bind(theme))}`;
         return withUsage(text, formatUsageStats(r.usage, r.model, r.contextWindow));
       };
 
@@ -789,13 +780,13 @@ export default function (pi: ExtensionAPI) {
       if (details.mode === 'single' && details.results.length === 1) {
         const r = details.results[0]!;
         const isError = r.exitCode !== -1 && isFailedResult(r);
-        const icon = resultIcon(r);
+        const statusText = resultStatus(r);
         const displayItems = getDisplayItems(r.messages);
         const finalOutput = getFinalOutput(r.messages);
 
         if (expanded) {
           const container = new Container();
-          let header = `${icon} ${theme.fg('toolTitle', theme.bold(r.label))}`;
+          let header = `${statusText} ${theme.fg('toolTitle', theme.bold(r.label))}`;
           if (isError && r.stopReason) header += ` ${theme.fg('error', `[${r.stopReason}]`)}`;
           container.addChild(new Text(header, 0, 0));
           if (isError && r.errorMessage)
@@ -853,17 +844,17 @@ export default function (pi: ExtensionAPI) {
 
       if (details.mode === 'chain') {
         const successCount = details.results.filter((r) => !isFailedResult(r)).length;
-        const icon = details.results.some((r) => r.exitCode === -1)
-          ? theme.fg('warning', '⏳')
+        const statusText = details.results.some((r) => r.exitCode === -1)
+          ? 'running'
           : successCount === details.results.length
-            ? theme.fg('success', '✓')
-            : theme.fg('error', '✗');
+            ? 'done'
+            : 'failed';
 
         if (expanded) {
           const container = new Container();
           container.addChild(
             new Text(
-              icon +
+              statusText +
                 ' ' +
                 theme.fg('toolTitle', theme.bold('chain ')) +
                 theme.fg('accent', `${successCount}/${details.results.length} steps`),
@@ -873,13 +864,13 @@ export default function (pi: ExtensionAPI) {
           );
 
           for (const r of details.results) {
-            const rIcon = resultIcon(r);
+            const itemStatusText = resultStatus(r);
             const displayItems = getDisplayItems(r.messages);
             const finalOutput = getFinalOutput(r.messages);
 
             container.addChild(new Spacer(1));
             container.addChild(
-              new Text(`${theme.fg('muted', `─── Step ${r.step}`)} ${rIcon}`, 0, 0),
+              new Text(`${theme.fg('muted', `─── Step ${r.step}`)} ${itemStatusText}`, 0, 0),
             );
             container.addChild(
               new Text(theme.fg('muted', 'Task: ') + theme.fg('dim', r.task), 0, 0),
@@ -916,7 +907,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         const header =
-          icon +
+          statusText +
           ' ' +
           theme.fg('toolTitle', theme.bold('chain ')) +
           theme.fg('accent', `${successCount}/${details.results.length} steps`);
@@ -936,11 +927,7 @@ export default function (pi: ExtensionAPI) {
           (r) => r.exitCode !== -1 && isFailedResult(r),
         ).length;
         const isRunning = running > 0;
-        const icon = isRunning
-          ? theme.fg('warning', '⏳')
-          : failCount > 0
-            ? theme.fg('warning', '◐')
-            : theme.fg('success', '✓');
+        const statusText = isRunning ? 'running' : failCount > 0 ? 'failed' : 'done';
         const status = isRunning
           ? `${successCount + failCount}/${details.results.length} done, ${running} running`
           : `${successCount}/${details.results.length} tasks`;
@@ -949,20 +936,24 @@ export default function (pi: ExtensionAPI) {
           const container = new Container();
           container.addChild(
             new Text(
-              `${icon} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`,
+              `${statusText} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`,
               0,
               0,
             ),
           );
 
           for (const r of details.results) {
-            const rIcon = isFailedResult(r) ? theme.fg('error', '✗') : theme.fg('success', '✓');
+            const itemStatusText = isFailedResult(r) ? 'failed' : 'done';
             const displayItems = getDisplayItems(r.messages);
             const finalOutput = getFinalOutput(r.messages);
 
             container.addChild(new Spacer(1));
             container.addChild(
-              new Text(`${theme.fg('muted', '─── ') + theme.fg('accent', r.label)} ${rIcon}`, 0, 0),
+              new Text(
+                `${theme.fg('muted', '─── ') + theme.fg('accent', r.label)} ${itemStatusText}`,
+                0,
+                0,
+              ),
             );
             container.addChild(
               new Text(theme.fg('muted', 'Task: ') + theme.fg('dim', r.task), 0, 0),
@@ -998,7 +989,7 @@ export default function (pi: ExtensionAPI) {
           return container;
         }
 
-        const header = `${icon} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`;
+        const header = `${statusText} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`;
         const totalUsage = isRunning ? '' : formatUsageStats(aggregateUsage(details.results));
         return collapsedList(
           withUsage(header, totalUsage && `Total: ${totalUsage}`),
