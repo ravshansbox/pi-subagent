@@ -567,3 +567,89 @@ test('does not run subagents in the background inside a subagent', async () => {
   assert.equal(result.content[0]?.text, 'done: Task: one');
   assert.equal(sent.length, 0);
 });
+
+const cliEntry = path.join(
+  binDir,
+  'node_modules',
+  '@earendil-works',
+  'pi-coding-agent',
+  'dist',
+  'bundle',
+  'cli.js',
+);
+
+function writeFakeCli(file: string, answer: string, bin: string) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.appendFileSync(${JSON.stringify(bin)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+const message = {
+  role: 'assistant',
+  content: [{ type: 'text', text: ${JSON.stringify(answer)} }],
+  usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
+  stopReason: 'stop',
+};
+process.stdout.write(JSON.stringify({ type: 'message_end', message }) + '\\n');
+`,
+    { mode: 0o755 },
+  );
+}
+
+async function withArgv1<T>(script: string, fn: () => Promise<T>): Promise<T> {
+  const previous = process.argv[1];
+  process.argv[1] = script;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.argv[1];
+    else process.argv[1] = previous;
+  }
+}
+
+test('does not reuse an existing host entry that is not the pi CLI', async () => {
+  // Regression: embedded hosts have their own argv[1] which ignores pi flags, so reusing it
+  // starts a second copy of the host instead of a subagent and the call never returns.
+  const hostEntry = path.join(binDir, 'host', 'src', 'index.js');
+  fs.mkdirSync(path.dirname(hostEntry), { recursive: true });
+  fs.writeFileSync(hostEntry, '// host entry that ignores pi flags\n');
+
+  const result = await withArgv1(hostEntry, () =>
+    getTool().execute('1', { task: 'find bugs' }, undefined, undefined, ctx),
+  );
+
+  assert.equal(result.content[0]?.text, 'done: Task: find bugs');
+  assert.equal(childArgs().length, 1);
+});
+
+test('reuses argv[1] when it is the pi CLI entry', async () => {
+  writeFakeCli(cliEntry, 'via cli entry', argsFile);
+
+  const result = await withArgv1(cliEntry, () =>
+    getTool().execute('1', { task: 'find bugs' }, undefined, undefined, ctx),
+  );
+
+  assert.equal(result.content[0]?.text, 'via cli entry');
+  assert.equal(childArgs().length, 1);
+});
+
+test('honours PI_SUBAGENT_PI_BIN when argv[1] is not the pi CLI', async () => {
+  const altBin = path.join(binDir, 'alt-pi');
+  const altArgs = path.join(binDir, 'alt-args.jsonl');
+  writeFakeCli(altBin, 'via override', altArgs);
+  const hostEntry = path.join(binDir, 'host', 'src', 'index.js');
+
+  const previous = process.env['PI_SUBAGENT_PI_BIN'];
+  process.env['PI_SUBAGENT_PI_BIN'] = altBin;
+  try {
+    const result = await withArgv1(hostEntry, () =>
+      getTool().execute('1', { task: 'find bugs' }, undefined, undefined, ctx),
+    );
+    assert.equal(result.content[0]?.text, 'via override');
+    assert.equal(fs.readFileSync(altArgs, 'utf8').trim().split('\n').length, 1);
+  } finally {
+    if (previous === undefined) delete process.env['PI_SUBAGENT_PI_BIN'];
+    else process.env['PI_SUBAGENT_PI_BIN'] = previous;
+  }
+});

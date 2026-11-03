@@ -220,11 +220,40 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
   return results;
 }
 
+/**
+ * True only for the real pi CLI entry (`.../pi-coding-agent/dist/bundle/cli.js`, or the
+ * same path under a global `pi` install) — a script that understands pi's own flags such
+ * as `--mode json -p --no-session`.
+ *
+ * Hosts that embed the pi runtime in-process (a gateway/ChatOps wrapper) have a custom
+ * `process.argv[1]` (e.g. `~/my-gateway/src/index.js`) that silently ignores those flags.
+ * Reusing it there starts a second copy of the host instead of a subagent: the task never
+ * runs, the process never exits, and the subagent call hangs forever.
+ */
+function isPiCliScript(scriptPath: string): boolean {
+  const normalized = scriptPath.replace(/\\/g, '/');
+  return (
+    normalized.endsWith('/pi-coding-agent/dist/bundle/cli.js') ||
+    normalized.endsWith('/pi/dist/bundle/cli.js')
+  );
+}
+
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
   const currentScript = process.argv[1];
   const isBunVirtualScript = currentScript?.startsWith('/$bunfs/root/');
-  if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
+  if (
+    currentScript &&
+    !isBunVirtualScript &&
+    isPiCliScript(currentScript) &&
+    fs.existsSync(currentScript)
+  ) {
     return { command: process.execPath, args: [currentScript, ...args] };
+  }
+
+  // Hosts that embed pi can point at a specific CLI build; otherwise fall back to `pi`.
+  const overrideBin = process.env['PI_SUBAGENT_PI_BIN']?.trim();
+  if (overrideBin) {
+    return { command: overrideBin, args };
   }
 
   const execName = path.basename(process.execPath).toLowerCase();
