@@ -35,6 +35,8 @@ Subagents can start their own subagents, up to a maximum depth. The default is 2
 }
 ```
 
+Set it to `0` for no limit. Each level can start up to 8 parallel subagents, so cost can grow quickly. Any other value that is not a whole number of 0 or more shows an error, and the default is used.
+
 The main session reads this setting and passes it down to all nested subagents.
 
 Nested subagents cannot use `background`. A subagent's process exits when its turn ends, which would stop the job, and a late follow-up would replace its final reply.

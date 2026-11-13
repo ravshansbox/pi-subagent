@@ -647,17 +647,40 @@ async function runSubagent(
   };
 }
 
+function isValidMaxDepth(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0;
+}
+
 export default function (pi: ExtensionAPI) {
   const depth = Number(process.env['PI_SUBAGENT_DEPTH']) || 0;
-  const inheritedMaxDepth = Number(process.env['PI_SUBAGENT_MAX_DEPTH']) || undefined;
-  if (depth >= (inheritedMaxDepth ?? DEFAULT_MAX_DEPTH)) return;
+  const inheritedMaxDepthText = process.env['PI_SUBAGENT_MAX_DEPTH'];
+  const inheritedMaxDepth =
+    inheritedMaxDepthText && isValidMaxDepth(Number(inheritedMaxDepthText))
+      ? Number(inheritedMaxDepthText)
+      : undefined;
+  const effectiveMaxDepth = inheritedMaxDepth ?? DEFAULT_MAX_DEPTH;
+  if (effectiveMaxDepth > 0 && depth >= effectiveMaxDepth) return;
+
+  const getConfiguredMaxDepth = () => {
+    const settings = pi.getSettings() as { subagent?: { maxDepth?: unknown } };
+    return settings.subagent?.maxDepth;
+  };
 
   const getNesting = () => {
     if (inheritedMaxDepth !== undefined) return { depth, maxDepth: inheritedMaxDepth };
-    const settings = pi.getSettings() as { subagent?: { maxDepth?: unknown } };
-    const maxDepth = settings.subagent?.maxDepth;
-    return { depth, maxDepth: typeof maxDepth === 'number' ? maxDepth : DEFAULT_MAX_DEPTH };
+    const maxDepth = getConfiguredMaxDepth();
+    return { depth, maxDepth: isValidMaxDepth(maxDepth) ? maxDepth : DEFAULT_MAX_DEPTH };
   };
+
+  pi.on('session_start', (_event, ctx) => {
+    if (depth > 0 || !ctx.hasUI) return;
+    const maxDepth = getConfiguredMaxDepth();
+    if (maxDepth === undefined || isValidMaxDepth(maxDepth)) return;
+    ctx.ui.notify(
+      `subagent.maxDepth must be a whole number of 0 or more. Using the default of ${DEFAULT_MAX_DEPTH}.`,
+      'error',
+    );
+  });
 
   const backgroundJobs = new Map<number, AbortController>();
   let nextJobId = 1;

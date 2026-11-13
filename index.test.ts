@@ -92,7 +92,7 @@ type SentMessage = {
 function loadExtension(settings: Record<string, unknown> = {}) {
   let tool: Tool | undefined;
   const sent: SentMessage[] = [];
-  const handlers: Record<string, (() => unknown)[]> = {};
+  const handlers: Record<string, ((...args: unknown[]) => unknown)[]> = {};
   const pi = {
     registerTool: (t: Tool) => {
       tool = t;
@@ -100,7 +100,7 @@ function loadExtension(settings: Record<string, unknown> = {}) {
     sendMessage: (message: SentMessage['message'], options: unknown) => {
       sent.push({ message, options });
     },
-    on: (event: string, handler: () => unknown) => {
+    on: (event: string, handler: (...args: unknown[]) => unknown) => {
       (handlers[event] ??= []).push(handler);
     },
     getSettings: () => settings,
@@ -647,6 +647,32 @@ test('does not offer the subagent tool at the max depth', () => {
     withEnv({ PI_SUBAGENT_DEPTH: '2', PI_SUBAGENT_MAX_DEPTH: '2' }, registersTool),
     false,
   );
+});
+
+test('treats a max depth of 0 as unlimited', async () => {
+  assert.equal(
+    withEnv({ PI_SUBAGENT_DEPTH: '9', PI_SUBAGENT_MAX_DEPTH: '0' }, registersTool),
+    true,
+  );
+  const { tool } = loadExtension({ subagent: { maxDepth: 0 } });
+  await tool.execute('1', { task: 'one' }, undefined, undefined, ctx);
+  assert.deepEqual(childEnvs(), [{ depth: '1', maxDepth: '0' }]);
+});
+
+test('reports an invalid max depth and uses the default', async () => {
+  const { tool, handlers } = loadExtension({ subagent: { maxDepth: -1 } });
+  const notices: [string, string][] = [];
+  const uiCtx = {
+    ...ctx,
+    hasUI: true,
+    ui: { notify: (message: string, type: string) => notices.push([message, type]) },
+  };
+  for (const handler of handlers['session_start'] ?? []) await handler({}, uiCtx);
+  assert.deepEqual(notices, [
+    ['subagent.maxDepth must be a whole number of 0 or more. Using the default of 2.', 'error'],
+  ]);
+  await tool.execute('1', { task: 'one' }, undefined, undefined, ctx);
+  assert.deepEqual(childEnvs(), [{ depth: '1', maxDepth: '2' }]);
 });
 
 test('does not run subagents in the background inside a subagent', async () => {
