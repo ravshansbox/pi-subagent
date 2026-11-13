@@ -133,6 +133,10 @@ interface UsageStats {
   turns: number;
 }
 
+function emptyUsage(): UsageStats {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, contextTokens: 0, turns: 0 };
+}
+
 interface SingleResult {
   label: string;
   task: string;
@@ -273,14 +277,7 @@ async function runSingleAgent(
     exitCode: 0,
     messages: [],
     stderr: '',
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      contextTokens: 0,
-      turns: 0,
-    },
+    usage: emptyUsage(),
     model,
     contextWindow: parent.contextWindow,
     step,
@@ -544,14 +541,7 @@ async function runSubagent(
         exitCode: -1,
         messages: [],
         stderr: '',
-        usage: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          contextTokens: 0,
-          turns: 0,
-        },
+        usage: emptyUsage(),
       };
     }
 
