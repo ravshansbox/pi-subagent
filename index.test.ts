@@ -279,6 +279,15 @@ test('labels a failed single subagent without its normal stop reason', async () 
   assert.match(result.content[0]?.text ?? '', /^Agent failed: /);
 });
 
+test('reports invalid parameters as an error', async () => {
+  const tool = getTool();
+  const noMode = await tool.execute('1', {}, undefined, undefined, ctx);
+  assert.equal(noMode.isError, true);
+  const tasks = Array.from({ length: 9 }, () => ({ task: 'one' }));
+  const tooMany = await tool.execute('1', { tasks }, undefined, undefined, ctx);
+  assert.equal(tooMany.isError, true);
+});
+
 test('reports why a subagent could not start', async () => {
   const result = await getTool().execute(
     '1',

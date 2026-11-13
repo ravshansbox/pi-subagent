@@ -442,6 +442,7 @@ async function runSubagent(
     return {
       content: [{ type: 'text', text: 'Invalid parameters. Provide exactly one mode.' }],
       details: makeDetails('single')([]),
+      isError: true,
     };
   }
 
@@ -516,6 +517,7 @@ async function runSubagent(
           },
         ],
         details: makeDetails('parallel')([]),
+        isError: true,
       };
 
     const allResults: SingleResult[] = Array.from({ length: params.tasks.length });
