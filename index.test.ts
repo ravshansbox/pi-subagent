@@ -585,6 +585,22 @@ test('shows running background subagents in the status line', async () => {
   assert.deepEqual(statuses, ['1 subagent', '2 subagents', '1 subagent', undefined]);
 });
 
+test('refuses more than 5 running background subagents', async () => {
+  const { tool, handlers } = loadExtension();
+  for (let i = 0; i < 5; i++)
+    await tool.execute('1', { task: 'hang', background: true }, undefined, undefined, ctx);
+  const result = await tool.execute(
+    '1',
+    { task: 'one', background: true },
+    undefined,
+    undefined,
+    ctx,
+  );
+  for (const handler of handlers['session_shutdown'] ?? []) await handler();
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? '', /5 background subagent jobs are already running/);
+});
+
 test('stops background subagents when the session shuts down', async () => {
   const { tool, sent, handlers } = loadExtension();
   await tool.execute('1', { task: 'hang', background: true }, undefined, undefined, ctx);

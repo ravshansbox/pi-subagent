@@ -16,6 +16,7 @@ import { type Static, Type } from 'typebox';
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
+const MAX_BACKGROUND_JOBS = 5;
 const DEFAULT_MAX_OUTPUT_BYTES = 50 * 1024;
 const MAX_OUTPUT_BYTES_LIMIT = 1024 * 1024;
 const STDERR_CAP = 50 * 1024;
@@ -689,6 +690,18 @@ export default function (pi: ExtensionAPI) {
       const nesting = getNesting();
       if (depth > 0 || !params.background)
         return runSubagent(params, signal, onUpdate, ctx, nesting);
+
+      if (backgroundJobs.size >= MAX_BACKGROUND_JOBS)
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `${MAX_BACKGROUND_JOBS} background subagent jobs are already running. Wait for one to finish.`,
+            },
+          ],
+          details: { mode: 'single', results: [] },
+          isError: true,
+        };
 
       const jobId = nextJobId++;
       const controller = new AbortController();
