@@ -433,196 +433,169 @@ const SubagentParams = Type.Object({
   ),
 });
 
-async function runSubagent(
-  params: Static<typeof SubagentParams>,
-  signal: AbortSignal | undefined,
-  onUpdate: OnUpdateCallback | undefined,
-  ctx: ExtensionContext,
-  nesting: { depth: number; maxDepth: number },
-): Promise<AgentToolResult<SubagentDetails> & { isError?: boolean }> {
-  const maxOutputBytes = params.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
-  const limit = (output: string) => truncateOutput(output, maxOutputBytes);
-  const parent: ParentSettings = {
-    ...nesting,
-    provider: ctx.model?.provider,
-    model: ctx.model?.id,
-    contextWindow: ctx.model?.contextWindow,
-    thinkingLevel: ctx.thinkingLevel,
-  };
+type SubagentResult = AgentToolResult<SubagentDetails> & { isError?: boolean };
 
-  const hasChain = (params.chain?.length ?? 0) > 0;
-  const hasTasks = (params.tasks?.length ?? 0) > 0;
-  const hasSingle = Boolean(params.task);
-  const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
+const makeDetails =
+  (mode: SubagentDetails['mode']) =>
+  (results: SingleResult[]): SubagentDetails => ({ mode, results });
 
-  const makeDetails =
-    (mode: 'single' | 'parallel' | 'chain') =>
-    (results: SingleResult[]): SubagentDetails => ({
-      mode,
-      results,
-    });
+interface RunContext {
+  defaultCwd: string;
+  parent: ParentSettings;
+  signal: AbortSignal | undefined;
+  onUpdate: OnUpdateCallback | undefined;
+  limit: (output: string) => string;
+}
 
-  if (modeCount !== 1) {
-    return {
-      content: [{ type: 'text', text: 'Invalid parameters. Provide exactly one mode.' }],
-      details: makeDetails('single')([]),
-      isError: true,
-    };
-  }
+async function runChain(
+  chain: { task: string; cwd?: string | undefined }[],
+  { defaultCwd, parent, signal, onUpdate, limit }: RunContext,
+): Promise<SubagentResult> {
+  const results: SingleResult[] = [];
+  let previousOutput = '';
 
-  if (params.chain && params.chain.length > 0) {
-    const results: SingleResult[] = [];
-    let previousOutput = '';
+  for (let i = 0; i < chain.length; i++) {
+    const step = chain[i]!;
+    const taskWithContext = step.task.replace(/\{previous\}/g, () => previousOutput);
 
-    for (let i = 0; i < params.chain.length; i++) {
-      const step = params.chain[i]!;
-      const taskWithContext = step.task.replace(/\{previous\}/g, () => previousOutput);
-
-      const chainUpdate: OnUpdateCallback | undefined = onUpdate
-        ? (partial) => {
-            const currentResult = partial.details?.results[0];
-            if (currentResult) {
-              const allResults = [...results, currentResult];
-              onUpdate({
-                content: partial.content,
-                details: makeDetails('chain')(allResults),
-              });
-            }
+    const chainUpdate: OnUpdateCallback | undefined = onUpdate
+      ? (partial) => {
+          const currentResult = partial.details?.results[0];
+          if (currentResult) {
+            const allResults = [...results, currentResult];
+            onUpdate({
+              content: partial.content,
+              details: makeDetails('chain')(allResults),
+            });
           }
-        : undefined;
+        }
+      : undefined;
 
-      const result = await runSingleAgent({
-        defaultCwd: ctx.cwd,
-        parent,
-        label: `step ${i + 1}`,
-        task: taskWithContext,
-        cwd: step.cwd,
-        step: i + 1,
-        signal,
-        onUpdate: chainUpdate,
-        makeDetails: makeDetails('chain'),
-      });
-      results.push(result);
+    const result = await runSingleAgent({
+      defaultCwd,
+      parent,
+      label: `step ${i + 1}`,
+      task: taskWithContext,
+      cwd: step.cwd,
+      step: i + 1,
+      signal,
+      onUpdate: chainUpdate,
+      makeDetails: makeDetails('chain'),
+    });
+    results.push(result);
 
-      const isError = isFailedResult(result);
-      if (isError) {
-        const errorMsg = limit(getResultOutput(result));
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Chain stopped at step ${i + 1}: ${errorMsg}`,
-            },
-          ],
-          details: makeDetails('chain')(results),
-          isError: true,
-        };
-      }
-      previousOutput = limit(getFinalOutput(result.messages));
-    }
-    return {
-      content: [
-        {
-          type: 'text',
-          text: previousOutput || '(no output)',
-        },
-      ],
-      details: makeDetails('chain')(results),
-    };
-  }
-
-  if (params.tasks && params.tasks.length > 0) {
-    if (params.tasks.length > MAX_PARALLEL_TASKS)
+    if (isFailedResult(result)) {
       return {
         content: [
           {
             type: 'text',
-            text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
+            text: `Chain stopped at step ${i + 1}: ${limit(getResultOutput(result))}`,
           },
         ],
-        details: makeDetails('parallel')([]),
+        details: makeDetails('chain')(results),
         isError: true,
       };
-
-    const allResults: SingleResult[] = Array.from({ length: params.tasks.length });
-
-    for (let i = 0; i < params.tasks.length; i++) {
-      allResults[i] = {
-        label: `task ${i + 1}`,
-        task: params.tasks[i]!.task,
-        exitCode: -1,
-        messages: [],
-        stderr: '',
-        usage: emptyUsage(),
-      };
     }
+    previousOutput = limit(getFinalOutput(result.messages));
+  }
+  return {
+    content: [{ type: 'text', text: previousOutput || '(no output)' }],
+    details: makeDetails('chain')(results),
+  };
+}
 
-    const emitParallelUpdate = () => {
-      if (onUpdate) {
-        const running = allResults.filter((r) => r.exitCode === -1).length;
-        const done = allResults.filter((r) => r.exitCode !== -1).length;
-        onUpdate({
-          content: [
-            {
-              type: 'text',
-              text: `Parallel: ${done}/${allResults.length} done, ${running} running...`,
-            },
-          ],
-          details: makeDetails('parallel')([...allResults]),
-        });
-      }
-    };
-
-    const results = await mapWithConcurrencyLimit(
-      params.tasks,
-      MAX_CONCURRENCY,
-      async (t, index) => {
-        const result = await runSingleAgent({
-          defaultCwd: ctx.cwd,
-          parent,
-          label: `task ${index + 1}`,
-          task: t.task,
-          cwd: t.cwd,
-          signal,
-          onUpdate: (partial) => {
-            if (partial.details?.results[0]) {
-              allResults[index] = { ...partial.details.results[0], exitCode: -1 };
-              emitParallelUpdate();
-            }
-          },
-          makeDetails: makeDetails('parallel'),
-        });
-        allResults[index] = result;
-        emitParallelUpdate();
-        return result;
-      },
-    );
-
-    const successCount = results.filter((r) => !isFailedResult(r)).length;
-    const summaries = results.map((r) => {
-      const output = limit(getResultOutput(r));
-      const status = isFailedResult(r)
-        ? `failed${r.stopReason && r.stopReason !== 'stop' ? ` (${r.stopReason})` : ''}`
-        : 'completed';
-      return `### [${r.label}] ${status}\n\n${output}`;
-    });
+async function runParallel(
+  tasks: { task: string; cwd?: string | undefined }[],
+  { defaultCwd, parent, signal, onUpdate, limit }: RunContext,
+): Promise<SubagentResult> {
+  if (tasks.length > MAX_PARALLEL_TASKS)
     return {
       content: [
         {
           type: 'text',
-          text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join('\n\n---\n\n')}`,
+          text: `Too many parallel tasks (${tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
         },
       ],
-      details: makeDetails('parallel')(results),
+      details: makeDetails('parallel')([]),
+      isError: true,
     };
-  }
 
+  const allResults: SingleResult[] = tasks.map((t, i) => ({
+    label: `task ${i + 1}`,
+    task: t.task,
+    exitCode: -1,
+    messages: [],
+    stderr: '',
+    usage: emptyUsage(),
+  }));
+
+  const emitParallelUpdate = () => {
+    if (onUpdate) {
+      const running = allResults.filter((r) => r.exitCode === -1).length;
+      const done = allResults.filter((r) => r.exitCode !== -1).length;
+      onUpdate({
+        content: [
+          {
+            type: 'text',
+            text: `Parallel: ${done}/${allResults.length} done, ${running} running...`,
+          },
+        ],
+        details: makeDetails('parallel')([...allResults]),
+      });
+    }
+  };
+
+  const results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (t, index) => {
+    const result = await runSingleAgent({
+      defaultCwd,
+      parent,
+      label: `task ${index + 1}`,
+      task: t.task,
+      cwd: t.cwd,
+      signal,
+      onUpdate: (partial) => {
+        if (partial.details?.results[0]) {
+          allResults[index] = { ...partial.details.results[0], exitCode: -1 };
+          emitParallelUpdate();
+        }
+      },
+      makeDetails: makeDetails('parallel'),
+    });
+    allResults[index] = result;
+    emitParallelUpdate();
+    return result;
+  });
+
+  const successCount = results.filter((r) => !isFailedResult(r)).length;
+  const summaries = results.map((r) => {
+    const output = limit(getResultOutput(r));
+    const status = isFailedResult(r)
+      ? `failed${r.stopReason && r.stopReason !== 'stop' ? ` (${r.stopReason})` : ''}`
+      : 'completed';
+    return `### [${r.label}] ${status}\n\n${output}`;
+  });
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join('\n\n---\n\n')}`,
+      },
+    ],
+    details: makeDetails('parallel')(results),
+  };
+}
+
+async function runSingle(
+  task: string,
+  cwd: string | undefined,
+  { defaultCwd, parent, signal, onUpdate, limit }: RunContext,
+): Promise<SubagentResult> {
   const result = await runSingleAgent({
-    defaultCwd: ctx.cwd,
+    defaultCwd,
     parent,
     label: 'subagent',
-    task: params.task!,
-    cwd: params.cwd,
+    task,
+    cwd,
     signal,
     onUpdate,
     makeDetails: makeDetails('single'),
@@ -630,12 +603,7 @@ async function runSubagent(
   if (isFailedResult(result)) {
     const reason = result.stopReason && result.stopReason !== 'stop' ? result.stopReason : 'failed';
     return {
-      content: [
-        {
-          type: 'text',
-          text: `Agent ${reason}: ${limit(getResultOutput(result))}`,
-        },
-      ],
+      content: [{ type: 'text', text: `Agent ${reason}: ${limit(getResultOutput(result))}` }],
       details: makeDetails('single')([result]),
       isError: true,
     };
@@ -643,6 +611,39 @@ async function runSubagent(
   return {
     content: [{ type: 'text', text: limit(getFinalOutput(result.messages)) || '(no output)' }],
     details: makeDetails('single')([result]),
+  };
+}
+
+async function runSubagent(
+  params: Static<typeof SubagentParams>,
+  signal: AbortSignal | undefined,
+  onUpdate: OnUpdateCallback | undefined,
+  ctx: ExtensionContext,
+  nesting: { depth: number; maxDepth: number },
+): Promise<SubagentResult> {
+  const maxOutputBytes = params.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const run: RunContext = {
+    defaultCwd: ctx.cwd,
+    parent: {
+      ...nesting,
+      provider: ctx.model?.provider,
+      model: ctx.model?.id,
+      contextWindow: ctx.model?.contextWindow,
+      thinkingLevel: ctx.thinkingLevel,
+    },
+    signal,
+    onUpdate,
+    limit: (output) => truncateOutput(output, maxOutputBytes),
+  };
+
+  const { chain = [], tasks = [], task } = params;
+  if (chain.length > 0 && tasks.length === 0 && !task) return runChain(chain, run);
+  if (tasks.length > 0 && chain.length === 0 && !task) return runParallel(tasks, run);
+  if (task && chain.length === 0 && tasks.length === 0) return runSingle(task, params.cwd, run);
+  return {
+    content: [{ type: 'text', text: 'Invalid parameters. Provide exactly one mode.' }],
+    details: makeDetails('single')([]),
+    isError: true,
   };
 }
 
