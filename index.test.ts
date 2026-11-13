@@ -52,6 +52,7 @@ if (args[args.length - 1].includes('hang')) {
   setInterval(() => {}, 1000);
 }
 const task = args[args.length - 1];
+if (task.includes('big-stderr')) process.stderr.write('e'.repeat(200000));
 if (task.includes('crash')) process.kill(process.pid, 'SIGKILL');
 const message = {
   role: 'assistant',
@@ -322,6 +323,62 @@ test('truncates long parallel output without splitting characters', async () => 
   assert.match(result.content[0]?.text ?? '', /\] completed\n\na😀+\n\n\[Output truncated/u);
 });
 
+test('truncates long single output by default', async () => {
+  const result = await getTool().execute('1', { task: 'big-emoji' }, undefined, undefined, ctx);
+  assert.match(result.content[0]?.text ?? '', /^a😀+\n\n\[Output truncated/u);
+});
+
+test('truncates output to the requested maximum', async () => {
+  const result = await getTool().execute(
+    '1',
+    { task: 'big-emoji', maxOutputBytes: 1001 },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.match(result.content[0]?.text ?? '', /^a(😀){250}\n\n\[Output truncated/u);
+});
+
+test('keeps long output when the model asks for more', async () => {
+  const result = await getTool().execute(
+    '1',
+    { tasks: [{ task: 'big-emoji' }], maxOutputBytes: 1048576 },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.doesNotMatch(result.content[0]?.text ?? '', /Output truncated/);
+});
+
+test('limits the requested maximum output to 1 MB', () => {
+  const schema = getTool().parameters.properties['maxOutputBytes'] as { maximum: number };
+  assert.equal(schema.maximum, 1048576);
+});
+
+test('truncates previous output passed to the next chain step', async () => {
+  await getTool().execute(
+    '1',
+    { chain: [{ task: 'big-emoji' }, { task: 'after {previous}' }], maxOutputBytes: 1001 },
+    undefined,
+    undefined,
+    ctx,
+  );
+  const task = childArgs()[1]!.at(-1)!;
+  assert.match(task, /^Task: after a(😀){250}\n\n\[Output truncated/u);
+});
+
+test('keeps only the end of long stderr', async () => {
+  const result = await getTool().execute(
+    '1',
+    { task: 'big-stderr exit-fail' },
+    undefined,
+    undefined,
+    ctx,
+  );
+  const details = result.details as { results: { stderr: string }[] };
+  assert.equal(details.results[0]!.stderr.length, 51200);
+});
+
 test('reports a parallel task as running until its process exits', async () => {
   const updates: string[] = [];
   await getTool().execute(
@@ -454,7 +511,14 @@ test('kills a subagent that ignores SIGTERM after abort', { timeout: 10000 }, as
 
 test('does not offer agent selection', () => {
   const properties = Object.keys(getTool().parameters.properties);
-  assert.deepEqual(properties.sort(), ['background', 'chain', 'cwd', 'task', 'tasks']);
+  assert.deepEqual(properties.sort(), [
+    'background',
+    'chain',
+    'cwd',
+    'maxOutputBytes',
+    'task',
+    'tasks',
+  ]);
 });
 
 test('returns at once from a background subagent and delivers its result as a follow-up', async () => {

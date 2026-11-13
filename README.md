@@ -19,6 +19,8 @@ Pi loads the extension from `./index.ts`, adapted from pi's `examples/extensions
   - parallel: `{ tasks: [...] }`, up to 8 tasks, 4 at a time
   - chain: `{ chain: [...] }`, where `{previous}` is replaced with the previous step's output
 
+Output returned to the model is limited to 50 KB per subagent, and so is `{previous}`. The model can raise this with `maxOutputBytes`, up to 1 MB. The full output stays in the tool details.
+
 Each subagent runs in a separate `pi` process with its own context window. It uses the parent session's current provider, model and thinking level, passed as `--provider`, `--model` and `--thinking`.
 
 The collapsed result shows one line per subagent, with its status (`running`, `done` or `failed`) and usage, or the first line of its error. Press Ctrl+O to expand it.

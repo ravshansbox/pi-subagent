@@ -16,7 +16,9 @@ import { type Static, Type } from 'typebox';
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
-const PER_TASK_OUTPUT_CAP = 50 * 1024;
+const DEFAULT_MAX_OUTPUT_BYTES = 50 * 1024;
+const MAX_OUTPUT_BYTES_LIMIT = 1024 * 1024;
+const STDERR_CAP = 50 * 1024;
 const DEFAULT_MAX_DEPTH = 2;
 
 function formatTokens(count: number): string {
@@ -172,12 +174,12 @@ function getResultOutput(result: SingleResult): string {
   return getFinalOutput(result.messages) || '(no output)';
 }
 
-function truncateParallelOutput(output: string): string {
+function truncateOutput(output: string, maxBytes: number): string {
   const byteLength = Buffer.byteLength(output, 'utf8');
-  if (byteLength <= PER_TASK_OUTPUT_CAP) return output;
+  if (byteLength <= maxBytes) return output;
 
   const truncated = Buffer.from(output)
-    .toString('utf8', 0, PER_TASK_OUTPUT_CAP)
+    .toString('utf8', 0, maxBytes)
     .replace(/\uFFFD$/, '');
   return `${truncated}\n\n[Output truncated: ${byteLength - Buffer.byteLength(truncated, 'utf8')} bytes omitted. Full output preserved in tool details.]`;
 }
@@ -365,7 +367,7 @@ async function runSingleAgent(
     });
 
     proc.stderr.on('data', (data) => {
-      currentResult.stderr += data.toString();
+      currentResult.stderr = (currentResult.stderr + data.toString()).slice(-STDERR_CAP);
     });
 
     proc.on('close', (code) => {
@@ -407,6 +409,13 @@ const SubagentParams = Type.Object({
   cwd: Type.Optional(
     Type.String({ description: 'Working directory for the subagent process (single mode)' }),
   ),
+  maxOutputBytes: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: MAX_OUTPUT_BYTES_LIMIT,
+      description: `Maximum bytes of output returned per subagent (default ${DEFAULT_MAX_OUTPUT_BYTES}). Raise it only when you need the full output.`,
+    }),
+  ),
   background: Type.Optional(
     Type.Boolean({
       description:
@@ -422,6 +431,8 @@ async function runSubagent(
   ctx: ExtensionContext,
   nesting: { depth: number; maxDepth: number },
 ): Promise<AgentToolResult<SubagentDetails> & { isError?: boolean }> {
+  const maxOutputBytes = params.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const limit = (output: string) => truncateOutput(output, maxOutputBytes);
   const parent: ParentSettings = {
     ...nesting,
     provider: ctx.model?.provider,
@@ -486,7 +497,7 @@ async function runSubagent(
 
       const isError = isFailedResult(result);
       if (isError) {
-        const errorMsg = getResultOutput(result);
+        const errorMsg = limit(getResultOutput(result));
         return {
           content: [
             {
@@ -498,13 +509,13 @@ async function runSubagent(
           isError: true,
         };
       }
-      previousOutput = getFinalOutput(result.messages);
+      previousOutput = limit(getFinalOutput(result.messages));
     }
     return {
       content: [
         {
           type: 'text',
-          text: getFinalOutput(results[results.length - 1]!.messages) || '(no output)',
+          text: previousOutput || '(no output)',
         },
       ],
       details: makeDetails('chain')(results),
@@ -588,7 +599,7 @@ async function runSubagent(
 
     const successCount = results.filter((r) => !isFailedResult(r)).length;
     const summaries = results.map((r) => {
-      const output = truncateParallelOutput(getResultOutput(r));
+      const output = limit(getResultOutput(r));
       const status = isFailedResult(r)
         ? `failed${r.stopReason && r.stopReason !== 'stop' ? ` (${r.stopReason})` : ''}`
         : 'completed';
@@ -622,7 +633,7 @@ async function runSubagent(
       content: [
         {
           type: 'text',
-          text: `Agent ${reason}: ${getResultOutput(result)}`,
+          text: `Agent ${reason}: ${limit(getResultOutput(result))}`,
         },
       ],
       details: makeDetails('single')([result]),
@@ -630,7 +641,7 @@ async function runSubagent(
     };
   }
   return {
-    content: [{ type: 'text', text: getFinalOutput(result.messages) || '(no output)' }],
+    content: [{ type: 'text', text: limit(getFinalOutput(result.messages)) || '(no output)' }],
     details: makeDetails('single')([result]),
   };
 }
