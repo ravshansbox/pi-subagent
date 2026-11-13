@@ -294,6 +294,7 @@ async function runSingleAgent(
   };
 
   args.push(`Task: ${task}`);
+  if (signal?.aborted) throw new Error('Subagent was aborted');
   let wasAborted = false;
 
   const exitCode = await new Promise<number>((resolve) => {
@@ -309,6 +310,19 @@ async function runSingleAgent(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let buffer = '';
+    let killTimer: NodeJS.Timeout | undefined;
+    const killProc = () => {
+      wasAborted = true;
+      proc.kill('SIGTERM');
+      killTimer = setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+      }, 5000);
+    };
+    signal?.addEventListener('abort', killProc, { once: true });
+    const stopWatchingAbort = () => {
+      signal?.removeEventListener('abort', killProc);
+      clearTimeout(killTimer);
+    };
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
 
@@ -355,26 +369,16 @@ async function runSingleAgent(
     });
 
     proc.on('close', (code) => {
+      stopWatchingAbort();
       if (buffer.trim()) processLine(buffer);
       resolve(code ?? 1);
     });
 
     proc.on('error', (error) => {
+      stopWatchingAbort();
       currentResult.errorMessage = error.message;
       resolve(1);
     });
-
-    if (signal) {
-      const killProc = () => {
-        wasAborted = true;
-        proc.kill('SIGTERM');
-        setTimeout(() => {
-          if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
-        }, 5000);
-      };
-      if (signal.aborted) killProc();
-      else signal.addEventListener('abort', killProc, { once: true });
-    }
   });
 
   currentResult.exitCode = exitCode;
