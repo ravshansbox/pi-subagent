@@ -56,7 +56,9 @@ if (task.includes('big-stderr')) process.stderr.write('e'.repeat(200000));
 if (task.includes('crash')) process.kill(process.pid, 'SIGKILL');
 const message = {
   role: 'assistant',
-  content: [{ type: 'text', text: task.includes('big-emoji') ? 'a' + '😀'.repeat(20000) : 'done: ' + task }],
+  content: task.includes('two-parts')
+    ? [{ type: 'text', text: 'part 1' }, { type: 'text', text: 'part 2' }]
+    : [{ type: 'text', text: task.includes('big-emoji') ? 'a' + '😀'.repeat(20000) : 'done: ' + task }],
   usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
   stopReason: 'stop',
 };
@@ -267,6 +269,11 @@ test('keeps multi-byte characters split across output chunks', async () => {
     ctx,
   );
   assert.equal(result.content[0]?.text, 'done: Task: split-utf8 café');
+});
+
+test('returns every text part of the final reply', async () => {
+  const result = await getTool().execute('1', { task: 'two-parts' }, undefined, undefined, ctx);
+  assert.equal(result.content[0]?.text, 'part 1\n\npart 2');
 });
 
 test('reports a subagent killed by a signal as failed', async () => {
