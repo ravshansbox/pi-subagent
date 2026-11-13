@@ -253,17 +253,29 @@ interface ParentSettings {
   maxDepth: number;
 }
 
-async function runSingleAgent(
-  defaultCwd: string,
-  parent: ParentSettings,
-  label: string,
-  task: string,
-  cwd: string | undefined,
-  step: number | undefined,
-  signal: AbortSignal | undefined,
-  onUpdate: OnUpdateCallback | undefined,
-  makeDetails: (results: SingleResult[]) => SubagentDetails,
-): Promise<SingleResult> {
+interface SingleAgentOptions {
+  defaultCwd: string;
+  parent: ParentSettings;
+  label: string;
+  task: string;
+  cwd?: string | undefined;
+  step?: number | undefined;
+  signal: AbortSignal | undefined;
+  onUpdate: OnUpdateCallback | undefined;
+  makeDetails: (results: SingleResult[]) => SubagentDetails;
+}
+
+async function runSingleAgent({
+  defaultCwd,
+  parent,
+  label,
+  task,
+  cwd,
+  step,
+  signal,
+  onUpdate,
+  makeDetails,
+}: SingleAgentOptions): Promise<SingleResult> {
   const args: string[] = ['--mode', 'json', '-p', '--no-session'];
   if (parent.provider && parent.model) {
     args.push('--provider', parent.provider, '--model', parent.model);
@@ -479,17 +491,17 @@ async function runSubagent(
           }
         : undefined;
 
-      const result = await runSingleAgent(
-        ctx.cwd,
+      const result = await runSingleAgent({
+        defaultCwd: ctx.cwd,
         parent,
-        `step ${i + 1}`,
-        taskWithContext,
-        step.cwd,
-        i + 1,
+        label: `step ${i + 1}`,
+        task: taskWithContext,
+        cwd: step.cwd,
+        step: i + 1,
         signal,
-        chainUpdate,
-        makeDetails('chain'),
-      );
+        onUpdate: chainUpdate,
+        makeDetails: makeDetails('chain'),
+      });
       results.push(result);
 
       const isError = isFailedResult(result);
@@ -565,22 +577,21 @@ async function runSubagent(
       params.tasks,
       MAX_CONCURRENCY,
       async (t, index) => {
-        const result = await runSingleAgent(
-          ctx.cwd,
+        const result = await runSingleAgent({
+          defaultCwd: ctx.cwd,
           parent,
-          `task ${index + 1}`,
-          t.task,
-          t.cwd,
-          undefined,
+          label: `task ${index + 1}`,
+          task: t.task,
+          cwd: t.cwd,
           signal,
-          (partial) => {
+          onUpdate: (partial) => {
             if (partial.details?.results[0]) {
               allResults[index] = { ...partial.details.results[0], exitCode: -1 };
               emitParallelUpdate();
             }
           },
-          makeDetails('parallel'),
-        );
+          makeDetails: makeDetails('parallel'),
+        });
         allResults[index] = result;
         emitParallelUpdate();
         return result;
@@ -606,17 +617,16 @@ async function runSubagent(
     };
   }
 
-  const result = await runSingleAgent(
-    ctx.cwd,
+  const result = await runSingleAgent({
+    defaultCwd: ctx.cwd,
     parent,
-    'subagent',
-    params.task!,
-    params.cwd,
-    undefined,
+    label: 'subagent',
+    task: params.task!,
+    cwd: params.cwd,
     signal,
     onUpdate,
-    makeDetails('single'),
-  );
+    makeDetails: makeDetails('single'),
+  });
   if (isFailedResult(result)) {
     const reason = result.stopReason && result.stopReason !== 'stop' ? result.stopReason : 'failed';
     return {
