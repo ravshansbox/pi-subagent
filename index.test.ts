@@ -475,6 +475,60 @@ test('shows context percentage and short model name without cost', () => {
   assert.deepEqual(lines, ['done subagent · 2 turns ↑1.2k ↓300 12%/200k opus-5-5']);
 });
 
+test('expands chain steps with their task, tool calls, output and usage', () => {
+  const lines = renderResults(
+    'chain',
+    [
+      { label: 'step 1', step: 1, exitCode: 0, usage: usedUsage, messages: messagesWith('a.ts') },
+      { label: 'step 2', step: 2, exitCode: 0, usage: emptyUsage, messages: [] },
+    ],
+    true,
+  );
+  assert.deepEqual(lines, [
+    'done chain 2/2 steps',
+    '',
+    '─── Step 1 done',
+    'Task: t',
+    '→ read a.ts',
+    '',
+    'line 1',
+    'line 2',
+    '2 turns ↑1.2k ↓300',
+    '',
+    '─── Step 2 done',
+    'Task: t',
+    '',
+    'Total: 2 turns ↑1.2k ↓300',
+  ]);
+});
+
+test('expands finished parallel tasks with their task, tool calls, output and usage', () => {
+  const lines = renderResults(
+    'parallel',
+    [
+      { label: 'task 1', exitCode: 0, usage: usedUsage, messages: messagesWith('a.ts') },
+      { label: 'task 2', exitCode: 1, usage: emptyUsage, messages: [] },
+    ],
+    true,
+  );
+  assert.deepEqual(lines, [
+    'failed parallel 1/2 tasks',
+    '',
+    '─── task 1 done',
+    'Task: t',
+    '→ read a.ts',
+    '',
+    'line 1',
+    'line 2',
+    '2 turns ↑1.2k ↓300',
+    '',
+    '─── task 2 failed',
+    'Task: t',
+    '',
+    'Total: 2 turns ↑1.2k ↓300',
+  ]);
+});
+
 test('renders the parent context window for a finished subagent', async () => {
   const tool = getTool();
   const result = await tool.execute('1', { task: 'find bugs' }, undefined, undefined, ctx);
