@@ -894,8 +894,8 @@ export default function (pi: ExtensionAPI) {
         return container;
       };
 
-      if (details.mode === 'single' && details.results.length === 1) {
-        const r = details.results[0]!;
+      const [r] = details.results;
+      if (details.mode === 'single' && r && details.results.length === 1) {
         const isError = r.exitCode !== -1 && isFailedResult(r);
         const statusText = resultStatus(r);
         const displayItems = getDisplayItems(r.messages);
