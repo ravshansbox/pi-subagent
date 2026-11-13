@@ -804,8 +804,15 @@ export default function (pi: ExtensionAPI) {
 
       const mdTheme = getMarkdownTheme();
 
-      const resultStatus = (r: SingleResult) =>
-        r.exitCode === -1 ? 'running' : isFailedResult(r) ? 'failed' : 'done';
+      const resultStatus = (r: SingleResult) => {
+        if (r.exitCode === -1) return 'running';
+        return isFailedResult(r) ? 'failed' : 'done';
+      };
+
+      const groupStatus = (results: SingleResult[]) => {
+        if (results.some((r) => r.exitCode === -1)) return 'running';
+        return results.some(isFailedResult) ? 'failed' : 'done';
+      };
 
       const withUsage = (text: string, usageStr: string) =>
         usageStr ? text + theme.fg('dim', ` · ${usageStr}`) : text;
@@ -932,11 +939,7 @@ export default function (pi: ExtensionAPI) {
 
       if (details.mode === 'chain') {
         const successCount = details.results.filter((r) => !isFailedResult(r)).length;
-        const statusText = details.results.some((r) => r.exitCode === -1)
-          ? 'running'
-          : successCount === details.results.length
-            ? 'done'
-            : 'failed';
+        const statusText = groupStatus(details.results);
 
         const header =
           statusText +
@@ -964,7 +967,7 @@ export default function (pi: ExtensionAPI) {
           (r) => r.exitCode !== -1 && isFailedResult(r),
         ).length;
         const isRunning = running > 0;
-        const statusText = isRunning ? 'running' : failCount > 0 ? 'failed' : 'done';
+        const statusText = groupStatus(details.results);
         const status = isRunning
           ? `${successCount + failCount}/${details.results.length} done, ${running} running`
           : `${successCount}/${details.results.length} tasks`;
