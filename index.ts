@@ -55,6 +55,10 @@ function formatUsageStats(
   return parts.join(' ');
 }
 
+function shorten(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
 function formatToolCall(
   toolName: string,
   args: Record<string, unknown>,
@@ -68,7 +72,7 @@ function formatToolCall(
   switch (toolName) {
     case 'bash': {
       const command = String(args['command'] || '...');
-      const preview = command.length > 60 ? `${command.slice(0, 60)}...` : command;
+      const preview = shorten(command, 60);
       return themeFg('muted', '$ ') + themeFg('toolOutput', preview);
     }
     case 'read': {
@@ -118,7 +122,7 @@ function formatToolCall(
     }
     default: {
       const argsStr = JSON.stringify(args);
-      const preview = argsStr.length > 50 ? `${argsStr.slice(0, 50)}...` : argsStr;
+      const preview = shorten(argsStr, 50);
       return themeFg('accent', toolName) + themeFg('dim', ` ${preview}`);
     }
   }
@@ -766,7 +770,7 @@ export default function (pi: ExtensionAPI) {
         for (let i = 0; i < Math.min(args.chain.length, 3); i++) {
           const step = args.chain[i]!;
           const cleanTask = step.task.replace(/\{previous\}/g, '').trim();
-          const preview = cleanTask.length > 40 ? `${cleanTask.slice(0, 40)}...` : cleanTask;
+          const preview = shorten(cleanTask, 40);
           text += '\n  ' + theme.fg('muted', `${i + 1}.`) + theme.fg('dim', ` ${preview}`);
         }
         if (args.chain.length > 3)
@@ -778,18 +782,14 @@ export default function (pi: ExtensionAPI) {
           theme.fg('toolTitle', theme.bold('subagent ')) +
           theme.fg('accent', `parallel (${args.tasks.length} tasks)`);
         for (const t of args.tasks.slice(0, 3)) {
-          const preview = t.task.length > 40 ? `${t.task.slice(0, 40)}...` : t.task;
+          const preview = shorten(t.task, 40);
           text += `\n  ${theme.fg('dim', preview)}`;
         }
         if (args.tasks.length > 3)
           text += `\n  ${theme.fg('muted', `... +${args.tasks.length - 3} more`)}`;
         return new Text(text, 0, 0);
       }
-      const preview = args.task
-        ? args.task.length > 60
-          ? `${args.task.slice(0, 60)}...`
-          : args.task
-        : '...';
+      const preview = args.task ? shorten(args.task, 60) : '...';
       let text = theme.fg('toolTitle', theme.bold('subagent'));
       text += `\n  ${theme.fg('dim', preview)}`;
       return new Text(text, 0, 0);
