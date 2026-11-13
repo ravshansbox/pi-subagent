@@ -273,6 +273,12 @@ test('reports a subagent killed by a signal as failed', async () => {
   assert.equal(result.isError, true);
 });
 
+test('labels a failed single subagent without its normal stop reason', async () => {
+  const result = await getTool().execute('1', { task: 'exit-fail' }, undefined, undefined, ctx);
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? '', /^Agent failed: /);
+});
+
 test('reports why a subagent could not start', async () => {
   const result = await getTool().execute(
     '1',

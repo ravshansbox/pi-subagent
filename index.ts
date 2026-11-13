@@ -611,11 +611,13 @@ async function runSubagent(
     makeDetails('single'),
   );
   if (isFailedResult(result)) {
+    const reason =
+      result.stopReason && result.stopReason !== 'stop' ? result.stopReason : 'failed';
     return {
       content: [
         {
           type: 'text',
-          text: `Agent ${result.stopReason || 'failed'}: ${getResultOutput(result)}`,
+          text: `Agent ${reason}: ${getResultOutput(result)}`,
         },
       ],
       details: makeDetails('single')([result]),
