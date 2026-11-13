@@ -830,6 +830,62 @@ export default function (pi: ExtensionAPI) {
         return container;
       };
 
+      const aggregateUsage = (results: SingleResult[]) => {
+        const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 };
+        for (const r of results) {
+          total.input += r.usage.input;
+          total.output += r.usage.output;
+          total.cacheRead += r.usage.cacheRead;
+          total.cacheWrite += r.usage.cacheWrite;
+          total.turns += r.usage.turns;
+        }
+        return total;
+      };
+
+      const addToolCalls = (container: Container, displayItems: DisplayItem[]) => {
+        for (const item of displayItems) {
+          if (item.type === 'toolCall')
+            container.addChild(
+              new Text(
+                theme.fg('muted', '→ ') +
+                  formatToolCall(item.name, item.args, theme.fg.bind(theme)),
+                0,
+                0,
+              ),
+            );
+        }
+      };
+
+      const expandedList = (
+        header: string,
+        results: SingleResult[],
+        heading: (r: SingleResult) => string,
+      ) => {
+        const container = new Container();
+        container.addChild(new Text(header, 0, 0));
+
+        for (const r of results) {
+          const finalOutput = getFinalOutput(r.messages);
+          container.addChild(new Spacer(1));
+          container.addChild(new Text(`${heading(r)} ${resultStatus(r)}`, 0, 0));
+          container.addChild(new Text(theme.fg('muted', 'Task: ') + theme.fg('dim', r.task), 0, 0));
+          addToolCalls(container, getDisplayItems(r.messages));
+          if (finalOutput) {
+            container.addChild(new Spacer(1));
+            container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
+          }
+          const usageStr = formatUsageStats(r.usage, r.model, r.contextWindow);
+          if (usageStr) container.addChild(new Text(theme.fg('dim', usageStr), 0, 0));
+        }
+
+        const usageStr = formatUsageStats(aggregateUsage(results));
+        if (usageStr) {
+          container.addChild(new Spacer(1));
+          container.addChild(new Text(theme.fg('dim', `Total: ${usageStr}`), 0, 0));
+        }
+        return container;
+      };
+
       if (details.mode === 'single' && details.results.length === 1) {
         const r = details.results[0]!;
         const isError = r.exitCode !== -1 && isFailedResult(r);
@@ -852,17 +908,7 @@ export default function (pi: ExtensionAPI) {
           if (displayItems.length === 0 && !finalOutput) {
             container.addChild(new Text(theme.fg('muted', '(no output)'), 0, 0));
           } else {
-            for (const item of displayItems) {
-              if (item.type === 'toolCall')
-                container.addChild(
-                  new Text(
-                    theme.fg('muted', '→ ') +
-                      formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-                    0,
-                    0,
-                  ),
-                );
-            }
+            addToolCalls(container, displayItems);
             if (finalOutput) {
               container.addChild(new Spacer(1));
               container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
@@ -883,18 +929,6 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      const aggregateUsage = (results: SingleResult[]) => {
-        const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 };
-        for (const r of results) {
-          total.input += r.usage.input;
-          total.output += r.usage.output;
-          total.cacheRead += r.usage.cacheRead;
-          total.cacheWrite += r.usage.cacheWrite;
-          total.turns += r.usage.turns;
-        }
-        return total;
-      };
-
       if (details.mode === 'chain') {
         const successCount = details.results.filter((r) => !isFailedResult(r)).length;
         const statusText = details.results.some((r) => r.exitCode === -1)
@@ -903,67 +937,16 @@ export default function (pi: ExtensionAPI) {
             ? 'done'
             : 'failed';
 
-        if (expanded) {
-          const container = new Container();
-          container.addChild(
-            new Text(
-              statusText +
-                ' ' +
-                theme.fg('toolTitle', theme.bold('chain ')) +
-                theme.fg('accent', `${successCount}/${details.results.length} steps`),
-              0,
-              0,
-            ),
-          );
-
-          for (const r of details.results) {
-            const itemStatusText = resultStatus(r);
-            const displayItems = getDisplayItems(r.messages);
-            const finalOutput = getFinalOutput(r.messages);
-
-            container.addChild(new Spacer(1));
-            container.addChild(
-              new Text(`${theme.fg('muted', `─── Step ${r.step}`)} ${itemStatusText}`, 0, 0),
-            );
-            container.addChild(
-              new Text(theme.fg('muted', 'Task: ') + theme.fg('dim', r.task), 0, 0),
-            );
-
-            for (const item of displayItems) {
-              if (item.type === 'toolCall') {
-                container.addChild(
-                  new Text(
-                    theme.fg('muted', '→ ') +
-                      formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-                    0,
-                    0,
-                  ),
-                );
-              }
-            }
-
-            if (finalOutput) {
-              container.addChild(new Spacer(1));
-              container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-            }
-
-            const stepUsage = formatUsageStats(r.usage, r.model, r.contextWindow);
-            if (stepUsage) container.addChild(new Text(theme.fg('dim', stepUsage), 0, 0));
-          }
-
-          const usageStr = formatUsageStats(aggregateUsage(details.results));
-          if (usageStr) {
-            container.addChild(new Spacer(1));
-            container.addChild(new Text(theme.fg('dim', `Total: ${usageStr}`), 0, 0));
-          }
-          return container;
-        }
-
         const header =
           statusText +
           ' ' +
           theme.fg('toolTitle', theme.bold('chain ')) +
           theme.fg('accent', `${successCount}/${details.results.length} steps`);
+
+        if (expanded)
+          return expandedList(header, details.results, (r) =>
+            theme.fg('muted', `─── Step ${r.step}`),
+          );
         const totalUsage = formatUsageStats(aggregateUsage(details.results));
         return collapsedList(
           withUsage(header, totalUsage && `Total: ${totalUsage}`),
@@ -985,64 +968,14 @@ export default function (pi: ExtensionAPI) {
           ? `${successCount + failCount}/${details.results.length} done, ${running} running`
           : `${successCount}/${details.results.length} tasks`;
 
-        if (expanded && !isRunning) {
-          const container = new Container();
-          container.addChild(
-            new Text(
-              `${statusText} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`,
-              0,
-              0,
-            ),
-          );
-
-          for (const r of details.results) {
-            const itemStatusText = isFailedResult(r) ? 'failed' : 'done';
-            const displayItems = getDisplayItems(r.messages);
-            const finalOutput = getFinalOutput(r.messages);
-
-            container.addChild(new Spacer(1));
-            container.addChild(
-              new Text(
-                `${theme.fg('muted', '─── ') + theme.fg('accent', r.label)} ${itemStatusText}`,
-                0,
-                0,
-              ),
-            );
-            container.addChild(
-              new Text(theme.fg('muted', 'Task: ') + theme.fg('dim', r.task), 0, 0),
-            );
-
-            for (const item of displayItems) {
-              if (item.type === 'toolCall') {
-                container.addChild(
-                  new Text(
-                    theme.fg('muted', '→ ') +
-                      formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-                    0,
-                    0,
-                  ),
-                );
-              }
-            }
-
-            if (finalOutput) {
-              container.addChild(new Spacer(1));
-              container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-            }
-
-            const taskUsage = formatUsageStats(r.usage, r.model, r.contextWindow);
-            if (taskUsage) container.addChild(new Text(theme.fg('dim', taskUsage), 0, 0));
-          }
-
-          const usageStr = formatUsageStats(aggregateUsage(details.results));
-          if (usageStr) {
-            container.addChild(new Spacer(1));
-            container.addChild(new Text(theme.fg('dim', `Total: ${usageStr}`), 0, 0));
-          }
-          return container;
-        }
-
         const header = `${statusText} ${theme.fg('toolTitle', theme.bold('parallel '))}${theme.fg('accent', status)}`;
+
+        if (expanded && !isRunning)
+          return expandedList(
+            header,
+            details.results,
+            (r) => theme.fg('muted', '─── ') + theme.fg('accent', r.label),
+          );
         const totalUsage = isRunning ? '' : formatUsageStats(aggregateUsage(details.results));
         return collapsedList(
           withUsage(header, totalUsage && `Total: ${totalUsage}`),
