@@ -611,8 +611,7 @@ async function runSubagent(
     makeDetails('single'),
   );
   if (isFailedResult(result)) {
-    const reason =
-      result.stopReason && result.stopReason !== 'stop' ? result.stopReason : 'failed';
+    const reason = result.stopReason && result.stopReason !== 'stop' ? result.stopReason : 'failed';
     return {
       content: [
         {
