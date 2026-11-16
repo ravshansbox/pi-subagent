@@ -182,7 +182,7 @@ function renderResult(mode: string, result: Record<string, unknown>, expanded = 
   return renderResults(mode, [result], expanded).join('\n');
 }
 
-const usedUsage = { ...emptyUsage, input: 1200, output: 300, turns: 2 };
+const usedUsage = { input: 1200, output: 300, cacheRead: 1200, cacheWrite: 300, turns: 2 };
 
 function messagesWith(...paths: string[]) {
   const toolCalls = paths.map((p) => ({ type: 'toolCall', name: 'read', arguments: { path: p } }));
@@ -413,7 +413,7 @@ test('collapses a single subagent to one line with its status and usage', () => 
   const lines = renderResults('single', [
     { label: 'subagent', exitCode: 0, usage: usedUsage, messages: messagesWith('a.ts', 'b.ts') },
   ]);
-  assert.deepEqual(lines, ['done subagent • 2 turns • ↑1k ↓300']);
+  assert.deepEqual(lines, ['done subagent • 2 turns • R1k W300']);
 });
 
 test('collapses parallel tasks to a header and one line per task', () => {
@@ -423,7 +423,7 @@ test('collapses parallel tasks to a header and one line per task', () => {
   ]);
   assert.deepEqual(lines, [
     'running parallel 1/2 done, 1 running',
-    '  done task 1 • 2 turns • ↑1k ↓300',
+    '  done task 1 • 2 turns • R1k W300',
     '  running task 2',
   ]);
 });
@@ -442,9 +442,9 @@ test('collapses chain steps to a header with totals and one line per step', () =
     { label: 'step 2', exitCode: 0, usage: usedUsage, messages: messagesWith('b.ts') },
   ]);
   assert.deepEqual(lines, [
-    'done chain 2/2 steps • Total: 4 turns • ↑2k ↓600',
-    '  done step 1 • 2 turns • ↑1k ↓300',
-    '  done step 2 • 2 turns • ↑1k ↓300',
+    'done chain 2/2 steps • Total: 4 turns • R2k W600',
+    '  done step 1 • 2 turns • R1k W300',
+    '  done step 2 • 2 turns • R1k W300',
   ]);
 });
 
@@ -472,7 +472,7 @@ test('shows context percentage and short model name without cost', () => {
       messages: messagesWith('a.ts'),
     },
   ]);
-  assert.deepEqual(lines, ['done subagent • 2 turns • ↑1k ↓300 • 12%/200k • opus-5-5']);
+  assert.deepEqual(lines, ['done subagent • 2 turns • R1k W300 • 12%/200k • opus-5-5']);
 });
 
 test('rounds token counts like the status line', () => {
@@ -480,11 +480,11 @@ test('rounds token counts like the status line', () => {
     {
       label: 'subagent',
       exitCode: 0,
-      usage: { ...emptyUsage, input: 999600, output: 1500000, cacheRead: 9999 },
+      usage: { ...emptyUsage, cacheRead: 999600, cacheWrite: 9999 },
       messages: [],
     },
   ]);
-  assert.deepEqual(lines, ['done subagent • ↑1m ↓2m R10k']);
+  assert.deepEqual(lines, ['done subagent • R1m W10k']);
 });
 
 test('expands chain steps with their task, tool calls, output and usage', () => {
@@ -505,12 +505,12 @@ test('expands chain steps with their task, tool calls, output and usage', () => 
     '',
     'line 1',
     'line 2',
-    '2 turns • ↑1k ↓300',
+    '2 turns • R1k W300',
     '',
     '─── Step 2 done',
     'Task: t',
     '',
-    'Total: 2 turns • ↑1k ↓300',
+    'Total: 2 turns • R1k W300',
   ]);
 });
 
@@ -532,12 +532,12 @@ test('expands finished parallel tasks with their task, tool calls, output and us
     '',
     'line 1',
     'line 2',
-    '2 turns • ↑1k ↓300',
+    '2 turns • R1k W300',
     '',
     '─── task 2 failed',
     'Task: t',
     '',
-    'Total: 2 turns • ↑1k ↓300',
+    'Total: 2 turns • R1k W300',
   ]);
 });
 
@@ -548,7 +548,7 @@ test('renders the parent context window for a finished subagent', async () => {
     .renderResult(result, { expanded: false }, plainTheme)
     .render(200)
     .map((line) => line.trimEnd());
-  assert.deepEqual(lines, ['done subagent • 1 turn • ↑1 ↓1 • 0%/200k • opus-5-5']);
+  assert.deepEqual(lines, ['done subagent • 1 turn • 0%/200k • opus-5-5']);
 });
 
 test('shows the thinking level after the model when the model can reason', async () => {
@@ -559,7 +559,7 @@ test('shows the thinking level after the model when the model can reason', async
     .renderResult(result, { expanded: false }, plainTheme)
     .render(200)
     .map((line) => line.trimEnd());
-  assert.deepEqual(lines, ['done subagent • 1 turn • ↑1 ↓1 • 0%/200k • opus-5-5:medium']);
+  assert.deepEqual(lines, ['done subagent • 1 turn • 0%/200k • opus-5-5:medium']);
 });
 
 async function renderFirstUpdate(params: Record<string, unknown>, expanded: boolean) {

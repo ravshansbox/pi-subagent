@@ -44,8 +44,6 @@ function formatUsageStats(
   const parts: string[] = [];
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
   const tokens: string[] = [];
-  if (usage.input) tokens.push(`↑${formatTokens(usage.input)}`);
-  if (usage.output) tokens.push(`↓${formatTokens(usage.output)}`);
   if (usage.cacheRead) tokens.push(`R${formatTokens(usage.cacheRead)}`);
   if (usage.cacheWrite) tokens.push(`W${formatTokens(usage.cacheWrite)}`);
   if (tokens.length > 0) parts.push(tokens.join(' '));
