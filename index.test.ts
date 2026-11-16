@@ -59,7 +59,9 @@ const message = {
   content: task.includes('two-parts')
     ? [{ type: 'text', text: 'part 1' }, { type: 'text', text: 'part 2' }]
     : [{ type: 'text', text: task.includes('big-emoji') ? 'a' + '😀'.repeat(20000) : 'done: ' + task }],
-  usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
+  usage: task.includes('cached')
+    ? { input: 50, output: 1, cacheRead: 30, cacheWrite: 20, totalTokens: 101, cost: { total: 0 } }
+    : { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
   stopReason: 'stop',
 };
 const line = Buffer.from(JSON.stringify({ type: 'message_end', message }) + '\\n');
@@ -560,6 +562,28 @@ test('shows the thinking level after the model when the model can reason', async
     .render(200)
     .map((line) => line.trimEnd());
   assert.deepEqual(lines, ['done subagent • opus-5-5:medium • 0%/200k • 1 turn']);
+});
+
+test('shows the cache hit rate of the last reply when it is below 80%', async () => {
+  const tool = getTool();
+  const result = await tool.execute('1', { task: 'cached' }, undefined, undefined, ctx);
+  const lines = tool
+    .renderResult(result, { expanded: false }, plainTheme)
+    .render(200)
+    .map((line) => line.trimEnd());
+  assert.deepEqual(lines, ['done subagent • opus-5-5 • 0%/200k • R30 W20 CH30% • 1 turn']);
+});
+
+test('hides the cache hit rate at 80% or above and from totals', () => {
+  const lines = renderResults('chain', [
+    { label: 'step 1', exitCode: 0, usage: { ...usedUsage, cacheHitRate: 42 }, messages: [] },
+    { label: 'step 2', exitCode: 0, usage: { ...usedUsage, cacheHitRate: 79.5 }, messages: [] },
+  ]);
+  assert.deepEqual(lines, [
+    'done chain 2/2 steps • Total: R2k W600 • 4 turns',
+    '  done step 1 • R1k W300 CH42% • 2 turns',
+    '  done step 2 • R1k W300 • 2 turns',
+  ]);
 });
 
 async function renderFirstUpdate(params: Record<string, unknown>, expanded: boolean) {

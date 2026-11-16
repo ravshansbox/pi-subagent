@@ -36,6 +36,7 @@ function formatUsageStats(
     cacheWrite: number;
     contextTokens?: number;
     turns?: number;
+    cacheHitRate?: number | undefined;
   },
   model?: string,
   contextWindow?: number,
@@ -53,6 +54,10 @@ function formatUsageStats(
   const tokens: string[] = [];
   if (usage.cacheRead) tokens.push(`R${formatTokens(usage.cacheRead)}`);
   if (usage.cacheWrite) tokens.push(`W${formatTokens(usage.cacheWrite)}`);
+  const cacheHitRate = usage.cacheHitRate?.toFixed(0);
+  if (tokens.length > 0 && cacheHitRate !== undefined && Number(cacheHitRate) < 80) {
+    tokens.push(`CH${cacheHitRate}%`);
+  }
   if (tokens.length > 0) parts.push(tokens.join(' '));
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
   return parts.join(' • ');
@@ -138,6 +143,7 @@ interface UsageStats {
   cacheWrite: number;
   contextTokens: number;
   turns: number;
+  cacheHitRate?: number | undefined;
 }
 
 function emptyUsage(): UsageStats {
@@ -369,6 +375,9 @@ async function runSingleAgent({
             currentResult.usage.cacheRead += usage.cacheRead || 0;
             currentResult.usage.cacheWrite += usage.cacheWrite || 0;
             currentResult.usage.contextTokens = usage.totalTokens || 0;
+            const prompt = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+            currentResult.usage.cacheHitRate =
+              prompt > 0 ? ((usage.cacheRead || 0) / prompt) * 100 : undefined;
           }
           if (!currentResult.model && msg.model) currentResult.model = msg.model;
           if (msg.stopReason) currentResult.stopReason = msg.stopReason;
