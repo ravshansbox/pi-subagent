@@ -413,7 +413,7 @@ test('collapses a single subagent to one line with its status and usage', () => 
   const lines = renderResults('single', [
     { label: 'subagent', exitCode: 0, usage: usedUsage, messages: messagesWith('a.ts', 'b.ts') },
   ]);
-  assert.deepEqual(lines, ['done subagent · 2 turns ↑1k ↓300']);
+  assert.deepEqual(lines, ['done subagent • 2 turns • ↑1k ↓300']);
 });
 
 test('collapses parallel tasks to a header and one line per task', () => {
@@ -423,7 +423,7 @@ test('collapses parallel tasks to a header and one line per task', () => {
   ]);
   assert.deepEqual(lines, [
     'running parallel 1/2 done, 1 running',
-    '  done task 1 · 2 turns ↑1k ↓300',
+    '  done task 1 • 2 turns • ↑1k ↓300',
     '  running task 2',
   ]);
 });
@@ -442,9 +442,9 @@ test('collapses chain steps to a header with totals and one line per step', () =
     { label: 'step 2', exitCode: 0, usage: usedUsage, messages: messagesWith('b.ts') },
   ]);
   assert.deepEqual(lines, [
-    'done chain 2/2 steps · Total: 4 turns ↑2k ↓600',
-    '  done step 1 · 2 turns ↑1k ↓300',
-    '  done step 2 · 2 turns ↑1k ↓300',
+    'done chain 2/2 steps • Total: 4 turns • ↑2k ↓600',
+    '  done step 1 • 2 turns • ↑1k ↓300',
+    '  done step 2 • 2 turns • ↑1k ↓300',
   ]);
 });
 
@@ -472,7 +472,7 @@ test('shows context percentage and short model name without cost', () => {
       messages: messagesWith('a.ts'),
     },
   ]);
-  assert.deepEqual(lines, ['done subagent · 2 turns ↑1k ↓300 12%/200k opus-5-5']);
+  assert.deepEqual(lines, ['done subagent • 2 turns • ↑1k ↓300 • 12%/200k • opus-5-5']);
 });
 
 test('rounds token counts like the status line', () => {
@@ -484,7 +484,7 @@ test('rounds token counts like the status line', () => {
       messages: [],
     },
   ]);
-  assert.deepEqual(lines, ['done subagent · ↑1m ↓2m R10k']);
+  assert.deepEqual(lines, ['done subagent • ↑1m ↓2m R10k']);
 });
 
 test('expands chain steps with their task, tool calls, output and usage', () => {
@@ -505,12 +505,12 @@ test('expands chain steps with their task, tool calls, output and usage', () => 
     '',
     'line 1',
     'line 2',
-    '2 turns ↑1k ↓300',
+    '2 turns • ↑1k ↓300',
     '',
     '─── Step 2 done',
     'Task: t',
     '',
-    'Total: 2 turns ↑1k ↓300',
+    'Total: 2 turns • ↑1k ↓300',
   ]);
 });
 
@@ -532,12 +532,12 @@ test('expands finished parallel tasks with their task, tool calls, output and us
     '',
     'line 1',
     'line 2',
-    '2 turns ↑1k ↓300',
+    '2 turns • ↑1k ↓300',
     '',
     '─── task 2 failed',
     'Task: t',
     '',
-    'Total: 2 turns ↑1k ↓300',
+    'Total: 2 turns • ↑1k ↓300',
   ]);
 });
 
@@ -548,7 +548,7 @@ test('renders the parent context window for a finished subagent', async () => {
     .renderResult(result, { expanded: false }, plainTheme)
     .render(200)
     .map((line) => line.trimEnd());
-  assert.deepEqual(lines, ['done subagent · 1 turn ↑1 ↓1 0%/200k opus-5-5']);
+  assert.deepEqual(lines, ['done subagent • 1 turn • ↑1 ↓1 • 0%/200k • opus-5-5']);
 });
 
 async function renderFirstUpdate(params: Record<string, unknown>, expanded: boolean) {

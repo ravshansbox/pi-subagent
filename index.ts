@@ -42,16 +42,18 @@ function formatUsageStats(
 ): string {
   const parts: string[] = [];
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
-  if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
-  if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
-  if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
-  if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
+  const tokens: string[] = [];
+  if (usage.input) tokens.push(`↑${formatTokens(usage.input)}`);
+  if (usage.output) tokens.push(`↓${formatTokens(usage.output)}`);
+  if (usage.cacheRead) tokens.push(`R${formatTokens(usage.cacheRead)}`);
+  if (usage.cacheWrite) tokens.push(`W${formatTokens(usage.cacheWrite)}`);
+  if (tokens.length > 0) parts.push(tokens.join(' '));
   if (usage.contextTokens && contextWindow) {
     const percent = ((usage.contextTokens / contextWindow) * 100).toFixed(0);
     parts.push(`${percent}%/${formatTokens(contextWindow)}`);
   }
   if (model) parts.push(model.replace(/^.*\//, '').replace(/^claude-/, ''));
-  return parts.join(' ');
+  return parts.join(' • ');
 }
 
 function shorten(text: string, maxLength: number): string {
@@ -814,7 +816,7 @@ export default function (pi: ExtensionAPI) {
       };
 
       const withUsage = (text: string, usageStr: string) =>
-        usageStr ? text + theme.fg('dim', ` · ${usageStr}`) : text;
+        usageStr ? text + theme.fg('dim', ` • ${usageStr}`) : text;
 
       const collapsedLine = (r: SingleResult, label: string) => {
         let text = `${resultStatus(r)} ${label}`;
