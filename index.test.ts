@@ -551,6 +551,17 @@ test('renders the parent context window for a finished subagent', async () => {
   assert.deepEqual(lines, ['done subagent • 1 turn • ↑1 ↓1 • 0%/200k • opus-5-5']);
 });
 
+test('shows the thinking level after the model when the model can reason', async () => {
+  const tool = getTool();
+  const reasoningCtx = { ...ctx, model: { ...ctx.model, reasoning: true } };
+  const result = await tool.execute('1', { task: 'find bugs' }, undefined, undefined, reasoningCtx);
+  const lines = tool
+    .renderResult(result, { expanded: false }, plainTheme)
+    .render(200)
+    .map((line) => line.trimEnd());
+  assert.deepEqual(lines, ['done subagent • 1 turn • ↑1 ↓1 • 0%/200k • opus-5-5:medium']);
+});
+
 async function renderFirstUpdate(params: Record<string, unknown>, expanded: boolean) {
   const tool = getTool();
   const updates: unknown[] = [];

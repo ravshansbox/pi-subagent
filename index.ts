@@ -39,6 +39,7 @@ function formatUsageStats(
   },
   model?: string,
   contextWindow?: number,
+  thinkingLevel?: string,
 ): string {
   const parts: string[] = [];
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
@@ -52,7 +53,10 @@ function formatUsageStats(
     const percent = ((usage.contextTokens / contextWindow) * 100).toFixed(0);
     parts.push(`${percent}%/${formatTokens(contextWindow)}`);
   }
-  if (model) parts.push(model.replace(/^.*\//, '').replace(/^claude-/, ''));
+  if (model) {
+    const name = model.replace(/^.*\//, '').replace(/^claude-/, '');
+    parts.push(thinkingLevel ? `${name}:${thinkingLevel}` : name);
+  }
   return parts.join(' • ');
 }
 
@@ -151,6 +155,7 @@ interface SingleResult {
   usage: UsageStats;
   model?: string | undefined;
   contextWindow?: number | undefined;
+  thinkingLevel?: string | undefined;
   stopReason?: string | undefined;
   errorMessage?: string | undefined;
   step?: number | undefined;
@@ -253,6 +258,7 @@ interface ParentSettings {
   provider?: string | undefined;
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
+  reasoning?: boolean | undefined;
   contextWindow?: number | undefined;
   depth: number;
   maxDepth: number;
@@ -297,6 +303,7 @@ async function runSingleAgent({
     usage: emptyUsage(),
     model,
     contextWindow: parent.contextWindow,
+    thinkingLevel: parent.reasoning ? parent.thinkingLevel || 'off' : undefined,
     step,
   };
 
@@ -634,6 +641,7 @@ async function runSubagent(
       provider: ctx.model?.provider,
       model: ctx.model?.id,
       contextWindow: ctx.model?.contextWindow,
+      reasoning: ctx.model?.reasoning,
       thinkingLevel: ctx.thinkingLevel,
     },
     signal,
@@ -826,7 +834,10 @@ export default function (pi: ExtensionAPI) {
           if (error) text += ` ${theme.fg('error', error)}`;
           return text;
         }
-        return withUsage(text, formatUsageStats(r.usage, r.model, r.contextWindow));
+        return withUsage(
+          text,
+          formatUsageStats(r.usage, r.model, r.contextWindow, r.thinkingLevel),
+        );
       };
 
       const collapsedList = (header: string, results: SingleResult[]) => {
@@ -883,7 +894,7 @@ export default function (pi: ExtensionAPI) {
             container.addChild(new Spacer(1));
             container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
           }
-          const usageStr = formatUsageStats(r.usage, r.model, r.contextWindow);
+          const usageStr = formatUsageStats(r.usage, r.model, r.contextWindow, r.thinkingLevel);
           if (usageStr) container.addChild(new Text(theme.fg('dim', usageStr), 0, 0));
         }
 
@@ -923,7 +934,7 @@ export default function (pi: ExtensionAPI) {
               container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
             }
           }
-          const usageStr = formatUsageStats(r.usage, r.model, r.contextWindow);
+          const usageStr = formatUsageStats(r.usage, r.model, r.contextWindow, r.thinkingLevel);
           if (usageStr) {
             container.addChild(new Spacer(1));
             container.addChild(new Text(theme.fg('dim', usageStr), 0, 0));
