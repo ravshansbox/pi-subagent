@@ -42,19 +42,19 @@ function formatUsageStats(
   thinkingLevel?: string,
 ): string {
   const parts: string[] = [];
-  if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
-  const tokens: string[] = [];
-  if (usage.cacheRead) tokens.push(`R${formatTokens(usage.cacheRead)}`);
-  if (usage.cacheWrite) tokens.push(`W${formatTokens(usage.cacheWrite)}`);
-  if (tokens.length > 0) parts.push(tokens.join(' '));
-  if (usage.contextTokens && contextWindow) {
-    const percent = ((usage.contextTokens / contextWindow) * 100).toFixed(0);
-    parts.push(`${percent}%/${formatTokens(contextWindow)}`);
-  }
   if (model) {
     const name = model.replace(/^.*\//, '').replace(/^claude-/, '');
     parts.push(thinkingLevel ? `${name}:${thinkingLevel}` : name);
   }
+  if (usage.contextTokens && contextWindow) {
+    const percent = ((usage.contextTokens / contextWindow) * 100).toFixed(0);
+    parts.push(`${percent}%/${formatTokens(contextWindow)}`);
+  }
+  const tokens: string[] = [];
+  if (usage.cacheRead) tokens.push(`R${formatTokens(usage.cacheRead)}`);
+  if (usage.cacheWrite) tokens.push(`W${formatTokens(usage.cacheWrite)}`);
+  if (tokens.length > 0) parts.push(tokens.join(' '));
+  if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
   return parts.join(' • ');
 }
 
